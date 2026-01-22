@@ -1,0 +1,17 @@
+name: gas_ahorro
+publish_to: "none"
+description: App para ver precios de gasolineras en tiempo real.
+version: 0.1.0
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  google_maps_flutter: ^2.6.1
+  http: ^1.2.2
+  url_launcher: ^6.3.0
+
+flutter:
+  uses-material-design: true
