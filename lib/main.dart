@@ -54,6 +54,36 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
+  static const double _unselectedHue = BitmapDescriptor.hueAzure;
+
+  static const List<_FuelOption> _fuelOptions = [
+    _FuelOption(
+      id: FuelOptionId.gasolina95,
+      label: 'Gasolina 95',
+      keys: ['Gasolina 95 E5', 'Gasolina 95 E5 Premium'],
+    ),
+    _FuelOption(
+      id: FuelOptionId.gasolina98,
+      label: 'Gasolina 98',
+      keys: ['Gasolina 98 E5', 'Gasolina 98 E5 Premium'],
+    ),
+    _FuelOption(
+      id: FuelOptionId.gasoleoA,
+      label: 'Gasoleo A / Diesel normal',
+      keys: ['Gasoleo A'],
+    ),
+    _FuelOption(
+      id: FuelOptionId.gasoleoPremium,
+      label: 'Gasoleo Premium / Diesel premium',
+      keys: ['Gasoleo Premium'],
+    ),
+    _FuelOption(
+      id: FuelOptionId.gas,
+      label: 'GAS / GLP / GNC',
+      keys: ['GLP', 'GNC', 'GNL'],
+    ),
+  ];
+
   final _searchController = TextEditingController();
   final _searchFocusNode = FocusNode();
   final _fuelApi = FuelApi();
@@ -63,7 +93,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   final _directionsApi = DirectionsApi();
   final _uuid = const Uuid();
 
-  Future<List<Station>>? _stationsFuture;
   GoogleMapController? _mapController;
   Timer? _debounce;
   Timer? _nightTimer;
@@ -76,12 +105,22 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   double? _lastLng;
   Position? _currentPosition;
   Set<Polyline> _routePolylines = {};
+  bool _loadingStations = true;
+  String? _stationsError;
+  String? _stationsErrorDetails;
+  List<Station> _stations = [];
+  final Map<String, Map<FuelOptionId, double>> _stationFuelPrices = {};
+  double? _minPrice;
+  double? _maxPrice;
+  Set<Marker> _stationMarkers = const {};
+  FuelOptionId? _selectedFuel;
+  final Map<double, BitmapDescriptor> _iconCache = {};
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _stationsFuture = _fuelApi.fetchStations();
+    _loadStations();
     _sessionToken = _uuid.v4();
     _loadMapStyle();
     _initLocationAndNightMode();
@@ -106,117 +145,281 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: FutureBuilder<List<Station>>(
-        future: _stationsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return _ErrorState(
-              message: 'No se pudo cargar la informacion.',
-              details: snapshot.error.toString(),
-              onRetry: () => setState(() {
-                _stationsFuture = _fuelApi.fetchStations();
-              }),
-            );
-          }
-
-          final stations = snapshot.data ?? [];
-          if (stations.isEmpty) {
-            return _ErrorState(
-              message: 'No hay estaciones disponibles.',
-              details: 'Respuesta vacía del servicio.',
-              onRetry: () => setState(() {
-                _stationsFuture = _fuelApi.fetchStations();
-              }),
-            );
-          }
-
-          final prices = stations
-              .map((station) => station.bestPrice)
-              .whereType<double>()
-              .toList();
-          final minPrice = prices.reduce((a, b) => a < b ? a : b);
-          final maxPrice = prices.reduce((a, b) => a > b ? a : b);
-
-          return Stack(
-            children: [
-              GoogleMap(
-                initialCameraPosition: CameraPosition(
-                  target: LatLng(stations.first.lat, stations.first.lng),
-                  zoom: 6,
-                ),
-                onMapCreated: (controller) {
-                  _mapController = controller;
-                  _applyMapStyle();
-                },
-                myLocationEnabled: true,
-                myLocationButtonEnabled: true,
-                markers: stations
-                    .where((station) => station.bestPrice != null)
-                    .map((station) {
-                  final price = station.bestPrice!;
-                  final hue = PriceColor.hueFor(price, minPrice, maxPrice);
-                  return Marker(
-                    markerId: MarkerId(station.id),
-                    position: LatLng(station.lat, station.lng),
-                    icon: BitmapDescriptor.defaultMarkerWithHue(hue),
-                    onTap: () => _showStationSheet(station),
-                  );
-                }).toSet(),
-                polylines: _routePolylines,
-              ),
-              SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _SearchBar(
-                        controller: _searchController,
-                        focusNode: _searchFocusNode,
-                        onChanged: _onSearchChanged,
-                      ),
-                      if (_searchFocusNode.hasFocus &&
-                          (_predictions.isNotEmpty || _loadingPredictions))
-                        _PredictionsList(
-                          isLoading: _loadingPredictions,
-                          predictions: _predictions,
-                          onSelected: _onPredictionSelected,
-                        ),
-                      const SizedBox(height: 10),
-                      Text(
-                        'Escribe tu destino para recomendar gasolineras en ruta',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Colors.black87,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 16,
-                bottom: 24,
-                child: PriceLegend(minPrice: minPrice, maxPrice: maxPrice),
-              ),
-            ],
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Pendiente de integrar ruta y geocodificacion.'),
-            ),
-          );
-        },
-        icon: const Icon(Icons.alt_route),
-        label: const Text('Ruta'),
-      ),
+      body: _buildBody(),
     );
+  }
+
+  Widget _buildBody() {
+    if (_loadingStations) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_stationsError != null) {
+      return _ErrorState(
+        message: _stationsError!,
+        details: _stationsErrorDetails,
+        onRetry: _loadStations,
+      );
+    }
+
+    return Stack(
+      children: [
+        GoogleMap(
+          initialCameraPosition: CameraPosition(
+            target: LatLng(_stations.first.lat, _stations.first.lng),
+            zoom: 6,
+          ),
+          onMapCreated: (controller) {
+            _mapController = controller;
+            _applyMapStyle();
+          },
+          myLocationEnabled: true,
+          myLocationButtonEnabled: false,
+          markers: _stationMarkers,
+          polylines: _routePolylines,
+        ),
+        SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SearchBar(
+                  controller: _searchController,
+                  focusNode: _searchFocusNode,
+                  onChanged: _onSearchChanged,
+                ),
+                if (_searchFocusNode.hasFocus &&
+                    (_predictions.isNotEmpty || _loadingPredictions))
+                  _PredictionsList(
+                    isLoading: _loadingPredictions,
+                    predictions: _predictions,
+                    onSelected: _onPredictionSelected,
+                  ),
+                const SizedBox(height: 10),
+                _FuelSelector(
+                  selected: _selectedFuel,
+                  options: _fuelOptions,
+                  onChanged: _onFuelSelected,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Escribe tu destino para recomendar gasolineras en ruta',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Colors.black87,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_selectedFuel != null && _minPrice != null && _maxPrice != null)
+          Positioned(
+            left: 16,
+            bottom: 24,
+            child: PriceLegend(
+              minPrice: _minPrice!,
+              maxPrice: _maxPrice!,
+              label: _fuelLabelFor(_selectedFuel),
+            ),
+          ),
+        Positioned.fill(
+          child: SafeArea(
+            minimum: const EdgeInsets.all(16),
+            child: Align(
+              alignment: Alignment.bottomRight,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  FloatingActionButton(
+                    heroTag: 'fab-location',
+                    onPressed: _centerOnUser,
+                    child: const Icon(Icons.my_location),
+                  ),
+                  const SizedBox(height: 12),
+                  FloatingActionButton.extended(
+                    heroTag: 'fab-route',
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Pendiente de integrar ruta y geocodificacion.',
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.alt_route),
+                    label: const Text('Ruta'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _loadStations() async {
+    setState(() {
+      _loadingStations = true;
+      _stationsError = null;
+      _stationsErrorDetails = null;
+    });
+
+    try {
+      final stations = await _fuelApi.fetchStations();
+      if (!mounted) return;
+
+      if (stations.isEmpty) {
+        setState(() {
+          _loadingStations = false;
+          _stationsError = 'No hay estaciones disponibles.';
+          _stationsErrorDetails = 'Respuesta vacía del servicio.';
+        });
+        return;
+      }
+
+      final markers = _buildUnselectedMarkers(stations);
+
+      setState(() {
+        _stations = stations;
+        _stationFuelPrices
+          ..clear()
+          ..addAll(_buildFuelPriceIndex(stations));
+        _minPrice = null;
+        _maxPrice = null;
+        _stationMarkers = markers;
+        _loadingStations = false;
+      });
+      if (_selectedFuel != null) {
+        _rebuildMarkersForSelection();
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadingStations = false;
+        _stationsError = 'No se pudo cargar la informacion.';
+        _stationsErrorDetails = error.toString();
+      });
+    }
+  }
+
+  Set<Marker> _buildUnselectedMarkers(List<Station> stations) {
+    return stations.map((station) {
+      return Marker(
+        markerId: MarkerId(station.id),
+        position: LatLng(station.lat, station.lng),
+        icon: _iconForHue(_unselectedHue),
+        onTap: () => _showStationSheet(station),
+      );
+    }).toSet();
+  }
+
+  Set<Marker> _buildMarkersForSelection(
+    List<Station> stations,
+    double minPrice,
+    double maxPrice,
+  ) {
+    return stations.map((station) {
+      final price = _priceForSelectedFuel(station);
+      if (price == null) return null;
+      final hue = PriceColor.hueFor(price, minPrice, maxPrice);
+      return Marker(
+        markerId: MarkerId(station.id),
+        position: LatLng(station.lat, station.lng),
+        icon: _iconForHue(hue),
+        onTap: () => _showStationSheet(station),
+      );
+    }).whereType<Marker>().toSet();
+  }
+
+  double? _priceForSelectedFuel(Station station) {
+    final selected = _selectedFuel;
+    if (selected == null) return null;
+    final price = _stationFuelPrices[station.id]?[selected];
+    return price;
+  }
+
+  void _onFuelSelected(FuelOptionId? selection) {
+    setState(() {
+      _selectedFuel = selection;
+    });
+    _rebuildMarkersForSelection();
+  }
+
+  void _rebuildMarkersForSelection() {
+    if (_stations.isEmpty) return;
+    if (_selectedFuel == null) {
+      setState(() {
+        _stationMarkers = _buildUnselectedMarkers(_stations);
+        _minPrice = null;
+        _maxPrice = null;
+      });
+      return;
+    }
+
+    final prices = _stations
+        .map(_priceForSelectedFuel)
+        .whereType<double>()
+        .toList();
+
+    if (prices.isEmpty) {
+      setState(() {
+        _stationMarkers = const {};
+        _minPrice = null;
+        _maxPrice = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay estaciones con ese combustible.')),
+      );
+      return;
+    }
+
+    final minPrice = prices.reduce((a, b) => a < b ? a : b);
+    final maxPrice = prices.reduce((a, b) => a > b ? a : b);
+    final markers = _buildMarkersForSelection(_stations, minPrice, maxPrice);
+
+    setState(() {
+      _minPrice = minPrice;
+      _maxPrice = maxPrice;
+      _stationMarkers = markers;
+    });
+  }
+
+  Map<String, Map<FuelOptionId, double>> _buildFuelPriceIndex(
+    List<Station> stations,
+  ) {
+    final index = <String, Map<FuelOptionId, double>>{};
+    for (final station in stations) {
+      final prices = <FuelOptionId, double>{};
+      for (final option in _fuelOptions) {
+        final values = option.keys
+            .map((key) => station.prices[key])
+            .whereType<double>()
+            .toList();
+        if (values.isNotEmpty) {
+          prices[option.id] = values.reduce((a, b) => a < b ? a : b);
+        }
+      }
+      index[station.id] = prices;
+    }
+    return index;
+  }
+
+  BitmapDescriptor _iconForHue(double hue) {
+    final bucketed = (hue / 5).round() * 5.0;
+    return _iconCache.putIfAbsent(
+      bucketed,
+      () => BitmapDescriptor.defaultMarkerWithHue(bucketed),
+    );
+  }
+
+  String _fuelLabelFor(FuelOptionId? selection) {
+    if (selection == null) return '';
+    return _fuelOptions
+        .firstWhere((option) => option.id == selection)
+        .label;
   }
 
   Future<void> _loadMapStyle() async {
@@ -419,6 +622,44 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       );
     }
   }
+
+  Future<void> _centerOnUser() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Activa los servicios de ubicación.')),
+      );
+      return;
+    }
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Permiso de ubicación denegado.')),
+      );
+      return;
+    }
+
+    final position = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
+    _currentPosition = position;
+    _lastLat = position.latitude;
+    _lastLng = position.longitude;
+    await _refreshNightMode(position.latitude, position.longitude);
+    await _mapController?.animateCamera(
+      CameraUpdate.newLatLngZoom(
+        LatLng(position.latitude, position.longitude),
+        13,
+      ),
+    );
+  }
 }
 
 class _SearchBar extends StatelessWidget {
@@ -555,6 +796,75 @@ class _ErrorState extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+enum FuelOptionId {
+  gasolina95,
+  gasolina98,
+  gasoleoA,
+  gasoleoPremium,
+  gas,
+}
+
+class _FuelOption {
+  const _FuelOption({
+    required this.id,
+    required this.label,
+    required this.keys,
+  });
+
+  final FuelOptionId id;
+  final String label;
+  final List<String> keys;
+}
+
+class _FuelSelector extends StatelessWidget {
+  const _FuelSelector({
+    required this.selected,
+    required this.options,
+    required this.onChanged,
+  });
+
+  final FuelOptionId? selected;
+  final List<_FuelOption> options;
+  final ValueChanged<FuelOptionId?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          ChoiceChip(
+            label: const Text('Todos'),
+            selected: selected == null,
+            onSelected: (_) => onChanged(null),
+          ),
+          ...options.map((option) {
+            return ChoiceChip(
+              label: Text(option.label),
+              selected: selected == option.id,
+              onSelected: (value) =>
+                  onChanged(value ? option.id : null),
+            );
+          }),
+        ],
       ),
     );
   }

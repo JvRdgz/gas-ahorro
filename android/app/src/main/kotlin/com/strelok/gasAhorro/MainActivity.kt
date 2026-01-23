@@ -1,4 +1,4 @@
-package com.example.gas_ahorro
+package com.strelok.gasAhorro
 
 import io.flutter.embedding.android.FlutterActivity
 

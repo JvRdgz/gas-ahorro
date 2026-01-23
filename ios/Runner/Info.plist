@@ -28,6 +28,8 @@
 		<array>
 			<string>waze</string>
 		</array>
+		<key>GMSApiKey</key>
+		<string>$(GOOGLE_MAPS_API_KEY_IOS)</string>
 		<key>NSLocationWhenInUseUsageDescription</key>
 		<string>Necesitamos tu ubicación para ajustar el modo noche del mapa según el anochecer.</string>
 		<key>LSRequiresIPhoneOS</key>

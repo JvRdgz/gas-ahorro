@@ -7,10 +7,12 @@ class PriceLegend extends StatelessWidget {
     super.key,
     required this.minPrice,
     required this.maxPrice,
+    this.label,
   });
 
   final double minPrice;
   final double maxPrice;
+  final String? label;
 
   @override
   Widget build(BuildContext context) {
@@ -27,16 +29,33 @@ class PriceLegend extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _LegendDot(color: PriceColor.colorFor(minPrice, minPrice, maxPrice)),
-          const SizedBox(width: 6),
-          Text('Mas barata'),
-          const SizedBox(width: 12),
-          _LegendDot(color: PriceColor.colorFor(maxPrice, minPrice, maxPrice)),
-          const SizedBox(width: 6),
-          Text('Mas cara'),
+          if (label != null && label!.isNotEmpty) ...[
+            Text(
+              label!,
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
+            const SizedBox(height: 6),
+          ],
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _LegendDot(
+                color: PriceColor.colorFor(minPrice, minPrice, maxPrice),
+              ),
+              const SizedBox(width: 6),
+              Text('Mas barata'),
+              const SizedBox(width: 12),
+              _LegendDot(
+                color: PriceColor.colorFor(maxPrice, minPrice, maxPrice),
+              ),
+              const SizedBox(width: 6),
+              Text('Mas cara'),
+            ],
+          ),
         ],
       ),
     );
