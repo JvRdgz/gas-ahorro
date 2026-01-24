@@ -47,4 +47,5 @@ app.*.map.json
 # Local env
 .env.json
 android/local.properties
+android/secrets.properties
 ios/Flutter/Local.xcconfig

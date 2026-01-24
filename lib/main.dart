@@ -57,6 +57,8 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   static const double _unselectedHue = BitmapDescriptor.hueAzure;
+  static const Color _brandGreenDark = Color(0xFF0B6E4F);
+  static const Color _brandGreenLight = Color(0xFF57D39D);
 
   static const List<_FuelOption> _fuelOptions = [
     _FuelOption(
@@ -102,7 +104,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   double? _lastLng;
   Position? _currentPosition;
   Set<Polyline> _routePolylines = {};
-  List<LatLng> _routePoints = [];
   List<Station> _routeStations = [];
   bool _hasRoute = false;
   double? _destinationLat;
@@ -190,7 +191,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 Text(
                   'Escribe tu destino para recomendarte gasolineras en ruta.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.black54,
+                        color: _palette.textSecondary,
                       ),
                 ),
                 const SizedBox(height: 8),
@@ -198,6 +199,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   controller: _searchController,
                   focusNode: _searchFocusNode,
                   onChanged: _onSearchChanged,
+                  palette: _palette,
                 ),
                 if (_searchFocusNode.hasFocus &&
                     (_predictions.isNotEmpty || _loadingPredictions))
@@ -205,11 +207,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     isLoading: _loadingPredictions,
                     predictions: _predictions,
                     onSelected: _onPredictionSelected,
+                    palette: _palette,
                   ),
                 const SizedBox(height: 10),
                 _FilterButton(
                   label: _filterLabel(),
                   onPressed: _openFuelFilter,
+                  palette: _palette,
                 ),
               ],
             ),
@@ -223,6 +227,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               minPrice: _minPrice!,
               maxPrice: _maxPrice!,
               label: _fuelLabelFor(_selectedFuel),
+              backgroundColor: _palette.isDark
+                  ? _palette.surface.withOpacity(0.95)
+                  : _palette.surfaceAlt,
+              textColor: _palette.textPrimary,
+              secondaryTextColor: _palette.textSecondary,
+              shadowColor: _palette.shadow,
+              borderColor: _palette.border,
             ),
           ),
         Positioned.fill(
@@ -295,7 +306,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         _loadingStations = false;
       });
       if (_selectedFuel != null) {
-        _rebuildMarkersForSelection();
+        await _rebuildMarkersForSelection();
       }
     } catch (error) {
       if (!mounted) return;
@@ -344,10 +355,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openFuelFilter() async {
+    final palette = _palette;
     final result = await showModalBottomSheet<_FilterResult>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
+      backgroundColor: palette.surface,
       builder: (context) {
         FuelOptionId? tempSelection = _selectedFuel;
         bool tempCheapestOnly = _filterCheapestOnly;
@@ -366,7 +379,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 children: [
                   Text(
                     'Selecciona combustible',
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: palette.textPrimary,
+                        ),
                   ),
                   const SizedBox(height: 12),
                   Wrap(
@@ -374,16 +389,36 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     runSpacing: 8,
                     children: [
                       ChoiceChip(
-                        label: const Text('Sin filtro'),
+                        label: Text(
+                          'Sin filtro',
+                          style: TextStyle(color: palette.textPrimary),
+                        ),
                         selected: tempSelection == null,
+                        selectedColor: palette.isDark
+                            ? palette.accent.withOpacity(0.35)
+                            : const Color(0xFFE6F4EE),
+                        backgroundColor: palette.surfaceAlt,
+                        checkmarkColor:
+                            palette.isDark ? Colors.black87 : palette.accent,
+                        side: BorderSide(color: palette.border),
                         onSelected: (_) => setModalState(() {
                           tempSelection = null;
                         }),
                       ),
                       ..._fuelOptions.map((option) {
                         return ChoiceChip(
-                          label: Text(option.label),
+                          label: Text(
+                            option.label,
+                            style: TextStyle(color: palette.textPrimary),
+                          ),
                           selected: tempSelection == option.id,
+                          selectedColor: palette.isDark
+                              ? palette.accent.withOpacity(0.35)
+                              : const Color(0xFFE6F4EE),
+                          backgroundColor: palette.surfaceAlt,
+                          checkmarkColor:
+                              palette.isDark ? Colors.black87 : palette.accent,
+                          side: BorderSide(color: palette.border),
                           onSelected: (value) => setModalState(() {
                             tempSelection = value ? option.id : null;
                           }),
@@ -394,9 +429,16 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   const SizedBox(height: 12),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Solo mas baratas'),
-                    subtitle: const Text('Muestra solo el tramo mas economico.'),
+                    title: Text(
+                      'Solo mas baratas',
+                      style: TextStyle(color: palette.textPrimary),
+                    ),
+                    subtitle: Text(
+                      'Muestra solo el tramo mas economico.',
+                      style: TextStyle(color: palette.textSecondary),
+                    ),
                     value: tempCheapestOnly,
+                    activeColor: palette.accent,
                     onChanged: (value) => setModalState(() {
                       tempCheapestOnly = value;
                     }),
@@ -408,18 +450,34 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                         child: OutlinedButton(
                           onPressed: () => Navigator.of(context).pop(),
                           child: const Text('Cancelar'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: palette.textPrimary,
+                            side: BorderSide(color: palette.border),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: FilledButton(
-                          onPressed: () => Navigator.of(context).pop(
-                            _FilterResult(
-                              fuel: tempSelection,
-                              cheapestOnly: tempCheapestOnly,
-                            ),
-                          ),
+                          onPressed: () {
+                            if (!mounted) return;
+                            setState(() {
+                              _isApplyingFilter = true;
+                            });
+                            Navigator.of(context).pop(
+                              _FilterResult(
+                                fuel: tempSelection,
+                                cheapestOnly: tempCheapestOnly,
+                              ),
+                            );
+                          },
                           child: const Text('Aplicar'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: palette.accent,
+                            foregroundColor: palette.isDark
+                                ? Colors.black87
+                                : Colors.white,
+                          ),
                         ),
                       ),
                     ],
@@ -445,15 +503,16 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _selectedFuel = selection;
       _filterCheapestOnly = cheapestOnly;
     });
-    await Future<void>.delayed(const Duration(milliseconds: 16));
-    _rebuildMarkersForSelection();
+    await Future<void>.delayed(Duration.zero);
+    await WidgetsBinding.instance.endOfFrame;
+    await _rebuildMarkersForSelection();
     if (!mounted) return;
     setState(() {
       _isApplyingFilter = false;
     });
   }
 
-  void _rebuildMarkersForSelection() {
+  Future<void> _rebuildMarkersForSelection() async {
     if (_stations.isEmpty) return;
     final baseStations = _hasRoute ? _routeStations : _stations;
     if (baseStations.isEmpty) {
@@ -479,16 +538,18 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       return;
     }
 
-    final pricedStations = baseStations
-        .map((station) {
-          final price = _priceForSelectedFuel(station);
-          if (price == null) return null;
-          return _StationPrice(station: station, price: price);
-        })
-        .whereType<_StationPrice>()
-        .toList();
+    final entries = <Map<String, dynamic>>[];
+    for (var i = 0; i < baseStations.length; i++) {
+      final station = baseStations[i];
+      final price = _priceForSelectedFuel(station);
+      if (price == null) continue;
+      entries.add({
+        'index': i,
+        'price': price,
+      });
+    }
 
-    if (pricedStations.isEmpty) {
+    if (entries.isEmpty) {
       setState(() {
         _stationMarkers = const {};
         _minPrice = null;
@@ -500,30 +561,28 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       return;
     }
 
-    var stationsToUse = pricedStations;
-    if (_filterCheapestOnly) {
-      stationsToUse = _filterCheapest(pricedStations);
-      if (stationsToUse.isEmpty) {
-        setState(() {
-          _stationMarkers = const {};
-          _minPrice = null;
-          _maxPrice = null;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No hay estaciones en el rango barato.')),
-        );
-        return;
-      }
+    final result = await compute(_filterStationsForSelection, {
+      'entries': entries,
+      'filterCheapestOnly': _filterCheapestOnly,
+    });
+    if (!mounted) return;
+    final indices = (result['indices'] as List).cast<int>();
+    if (indices.isEmpty) {
+      setState(() {
+        _stationMarkers = const {};
+        _minPrice = null;
+        _maxPrice = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay estaciones en el rango barato.')),
+      );
+      return;
     }
-
-    final minPrice = stationsToUse
-        .map((entry) => entry.price)
-        .reduce((a, b) => a < b ? a : b);
-    final maxPrice = stationsToUse
-        .map((entry) => entry.price)
-        .reduce((a, b) => a > b ? a : b);
+    final minPrice = (result['minPrice'] as num).toDouble();
+    final maxPrice = (result['maxPrice'] as num).toDouble();
+    final stationsToUse = indices.map((i) => baseStations[i]).toList();
     final markers = _buildMarkersForSelection(
-      stationsToUse.map((entry) => entry.station).toList(),
+      stationsToUse,
       minPrice,
       maxPrice,
     );
@@ -594,14 +653,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     return HSVColor.fromAHSV(1, _unselectedHue, 0.85, 0.9).toColor();
   }
 
-  List<_StationPrice> _filterCheapest(List<_StationPrice> entries) {
-    if (entries.isEmpty) return entries;
-    final prices = entries.map((entry) => entry.price).toList()..sort();
-    final cutoffIndex = ((prices.length - 1) * 0.25).round();
-    final cutoff = prices[cutoffIndex];
-    return entries.where((entry) => entry.price <= cutoff).toList();
-  }
-
   Future<void> _applyRouteFilter(List<LatLng> routePoints) async {
     if (_stations.isEmpty) return;
     setState(() {
@@ -628,9 +679,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     setState(() {
       _routeStations = routeStations;
       _hasRoute = true;
+    });
+    await _rebuildMarkersForSelection();
+    if (!mounted) return;
+    setState(() {
       _isApplyingFilter = false;
     });
-    _rebuildMarkersForSelection();
   }
 
   double _routeThresholdMeters(List<LatLng> points) {
@@ -767,10 +821,38 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   void _applyMapStyle() {
     final controller = _mapController;
     if (controller == null) return;
-    final isDark = _isNightByLocation ??
+    controller.setMapStyle(_isMapDark ? _darkMapStyle : null);
+  }
+
+  bool get _isMapDark {
+    return _isNightByLocation ??
         (WidgetsBinding.instance.platformDispatcher.platformBrightness ==
             Brightness.dark);
-    controller.setMapStyle(isDark ? _darkMapStyle : null);
+  }
+
+  _MapUiPalette get _palette {
+    if (_isMapDark) {
+      return const _MapUiPalette(
+        isDark: true,
+        surface: Color(0xFF1C2320),
+        surfaceAlt: Color(0xFF242E29),
+        textPrimary: Colors.white,
+        textSecondary: Colors.white70,
+        border: Color(0xFF2F3A34),
+        accent: _brandGreenLight,
+        shadow: Colors.black87,
+      );
+    }
+    return const _MapUiPalette(
+      isDark: false,
+      surface: Colors.white,
+      surfaceAlt: Color(0xFFF3F7F4),
+      textPrimary: Colors.black87,
+      textSecondary: Colors.black54,
+      border: Color(0xFFCBD8D1),
+      accent: _brandGreenDark,
+      shadow: Colors.black26,
+    );
   }
 
   Future<void> _initLocationAndNightMode() async {
@@ -916,7 +998,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             points: polylinePoints,
           ),
         };
-        _routePoints = polylinePoints;
         _hasRoute = polylinePoints.isNotEmpty;
       });
 
@@ -1023,23 +1104,25 @@ class _SearchBar extends StatelessWidget {
     required this.controller,
     required this.focusNode,
     required this.onChanged,
+    required this.palette,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final ValueChanged<String> onChanged;
+  final _MapUiPalette palette;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: palette.surface,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
-            color: Colors.black26,
+            color: palette.shadow.withOpacity(0.3),
             blurRadius: 12,
-            offset: Offset(0, 4),
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -1047,11 +1130,15 @@ class _SearchBar extends StatelessWidget {
         controller: controller,
         focusNode: focusNode,
         onChanged: onChanged,
-        decoration: const InputDecoration(
-          prefixIcon: Icon(Icons.search),
+        style: TextStyle(color: palette.textPrimary),
+        cursorColor: palette.accent,
+        decoration: InputDecoration(
+          prefixIcon: Icon(Icons.search, color: palette.textSecondary),
           hintText: 'Ir a',
+          hintStyle: TextStyle(color: palette.textSecondary),
           border: InputBorder.none,
-          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
       ),
     );
@@ -1063,24 +1150,26 @@ class _PredictionsList extends StatelessWidget {
     required this.isLoading,
     required this.predictions,
     required this.onSelected,
+    required this.palette,
   });
 
   final bool isLoading;
   final List<PlacePrediction> predictions;
   final ValueChanged<PlacePrediction> onSelected;
+  final _MapUiPalette palette;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(top: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: palette.surface,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
-            color: Colors.black26,
+            color: palette.shadow.withOpacity(0.3),
             blurRadius: 12,
-            offset: Offset(0, 4),
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -1098,11 +1187,17 @@ class _PredictionsList extends StatelessWidget {
               itemBuilder: (context, index) {
                 final prediction = predictions[index];
                 return ListTile(
-                  leading: const Icon(Icons.place),
-                  title: Text(prediction.primaryText),
+                  leading: Icon(Icons.place, color: palette.textSecondary),
+                  title: Text(
+                    prediction.primaryText,
+                    style: TextStyle(color: palette.textPrimary),
+                  ),
                   subtitle: prediction.secondaryText.isEmpty
                       ? null
-                      : Text(prediction.secondaryText),
+                      : Text(
+                          prediction.secondaryText,
+                          style: TextStyle(color: palette.textSecondary),
+                        ),
                   onTap: () => onSelected(prediction),
                 );
               },
@@ -1189,20 +1284,23 @@ class _FilterButton extends StatelessWidget {
   const _FilterButton({
     required this.label,
     required this.onPressed,
+    required this.palette,
   });
 
   final String label;
   final VoidCallback onPressed;
+  final _MapUiPalette palette;
 
   @override
   Widget build(BuildContext context) {
     return OutlinedButton.icon(
       onPressed: onPressed,
-      icon: const Icon(Icons.filter_alt),
+      icon: const Icon(Icons.local_gas_station),
       label: Text(label),
       style: OutlinedButton.styleFrom(
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
+        backgroundColor: palette.surface,
+        foregroundColor: palette.textPrimary,
+        side: BorderSide(color: palette.border),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
@@ -1212,14 +1310,75 @@ class _FilterButton extends StatelessWidget {
   }
 }
 
-class _StationPrice {
-  const _StationPrice({
-    required this.station,
-    required this.price,
+class _MapUiPalette {
+  const _MapUiPalette({
+    required this.isDark,
+    required this.surface,
+    required this.surfaceAlt,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.border,
+    required this.accent,
+    required this.shadow,
   });
 
-  final Station station;
-  final double price;
+  final bool isDark;
+  final Color surface;
+  final Color surfaceAlt;
+  final Color textPrimary;
+  final Color textSecondary;
+  final Color border;
+  final Color accent;
+  final Color shadow;
+}
+
+Map<String, dynamic> _filterStationsForSelection(
+  Map<String, dynamic> input,
+) {
+  final entries = (input['entries'] as List)
+      .cast<Map>()
+      .map((entry) => (
+            index: entry['index'] as int,
+            price: (entry['price'] as num).toDouble(),
+          ))
+      .toList();
+  if (entries.isEmpty) {
+    return {
+      'indices': <int>[],
+      'minPrice': 0.0,
+      'maxPrice': 0.0,
+    };
+  }
+
+  var filtered = entries;
+  final filterCheapestOnly = input['filterCheapestOnly'] as bool? ?? false;
+  if (filterCheapestOnly) {
+    final prices = entries.map((entry) => entry.price).toList()..sort();
+    final cutoffIndex = ((prices.length - 1) * 0.25).round();
+    final cutoff = prices[cutoffIndex];
+    filtered = entries.where((entry) => entry.price <= cutoff).toList();
+  }
+
+  if (filtered.isEmpty) {
+    return {
+      'indices': <int>[],
+      'minPrice': 0.0,
+      'maxPrice': 0.0,
+    };
+  }
+
+  var minPrice = filtered.first.price;
+  var maxPrice = filtered.first.price;
+  for (final entry in filtered.skip(1)) {
+    if (entry.price < minPrice) minPrice = entry.price;
+    if (entry.price > maxPrice) maxPrice = entry.price;
+  }
+
+  return {
+    'indices': filtered.map((entry) => entry.index).toList(),
+    'minPrice': minPrice,
+    'maxPrice': maxPrice,
+  };
 }
 
 List<int> _stationsNearRoute(Map<String, dynamic> input) {

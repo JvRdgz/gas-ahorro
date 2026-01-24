@@ -13,6 +13,11 @@ android {
     if (localPropertiesFile.exists()) {
         localPropertiesFile.inputStream().use { localProperties.load(it) }
     }
+    val secretsProperties = Properties()
+    val secretsPropertiesFile = rootProject.file("secrets.properties")
+    if (secretsPropertiesFile.exists()) {
+        secretsPropertiesFile.inputStream().use { secretsProperties.load(it) }
+    }
 
     namespace = "com.strelok.gasAhorro"
     compileSdk = flutter.compileSdkVersion
@@ -30,8 +35,12 @@ android {
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.strelok.gasAhorro"
-        manifestPlaceholders["MAPS_API_KEY_ANDROID"] =
-            localProperties.getProperty("MAPS_API_KEY_ANDROID") ?: ""
+        val mapsApiKey =
+            secretsProperties.getProperty("MAPS_API_KEY_ANDROID")
+                ?: localProperties.getProperty("MAPS_API_KEY_ANDROID")
+                ?: System.getenv("MAPS_API_KEY_ANDROID")
+                ?: ""
+        manifestPlaceholders["MAPS_API_KEY_ANDROID"] = mapsApiKey
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

@@ -39,7 +39,7 @@ class FuelApi {
   Map<String, double> _extractPrices(Map<String, dynamic> raw) {
     final prices = <String, double>{};
     raw.forEach((key, value) {
-      if (key is! String || !key.startsWith('Precio ')) return;
+      if (!key.startsWith('Precio ')) return;
       final parsed = _parseDouble(value);
       if (parsed == null || parsed <= 0) return;
       final label = key.replaceFirst('Precio ', '').trim();

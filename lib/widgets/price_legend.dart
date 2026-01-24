@@ -8,24 +8,35 @@ class PriceLegend extends StatelessWidget {
     required this.minPrice,
     required this.maxPrice,
     this.label,
+    this.backgroundColor,
+    this.textColor,
+    this.secondaryTextColor,
+    this.shadowColor,
+    this.borderColor,
   });
 
   final double minPrice;
   final double maxPrice;
   final String? label;
+  final Color? backgroundColor;
+  final Color? textColor;
+  final Color? secondaryTextColor;
+  final Color? shadowColor;
+  final Color? borderColor;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.9),
+        color: backgroundColor ?? Colors.white.withOpacity(0.9),
         borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
+        border: borderColor == null ? null : Border.all(color: borderColor!),
+        boxShadow: [
           BoxShadow(
-            color: Colors.black26,
+            color: (shadowColor ?? Colors.black26).withOpacity(0.6),
             blurRadius: 10,
-            offset: Offset(0, 4),
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -36,7 +47,9 @@ class PriceLegend extends StatelessWidget {
           if (label != null && label!.isNotEmpty) ...[
             Text(
               label!,
-              style: Theme.of(context).textTheme.labelMedium,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: textColor,
+                  ),
             ),
             const SizedBox(height: 6),
           ],
@@ -47,13 +60,19 @@ class PriceLegend extends StatelessWidget {
                 color: PriceColor.colorFor(minPrice, minPrice, maxPrice),
               ),
               const SizedBox(width: 6),
-              Text('Mas barata'),
+              Text(
+                'Mas barata',
+                style: TextStyle(color: secondaryTextColor ?? textColor),
+              ),
               const SizedBox(width: 12),
               _LegendDot(
                 color: PriceColor.colorFor(maxPrice, minPrice, maxPrice),
               ),
               const SizedBox(width: 6),
-              Text('Mas cara'),
+              Text(
+                'Mas cara',
+                style: TextStyle(color: secondaryTextColor ?? textColor),
+              ),
             ],
           ),
         ],
