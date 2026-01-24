@@ -1,5 +1,9 @@
 import 'dart:io' show Platform;
 
+const _webKey = String.fromEnvironment(
+  'GOOGLE_MAPS_API_KEY_WEB',
+  defaultValue: '',
+);
 const _androidKey = String.fromEnvironment(
   'GOOGLE_MAPS_API_KEY_ANDROID',
   defaultValue: '',
@@ -14,6 +18,9 @@ const _defaultKey = String.fromEnvironment(
 );
 
 String get googleMapsApiKey {
+  if (_webKey.isNotEmpty) {
+    return _webKey;
+  }
   if (Platform.isAndroid && _androidKey.isNotEmpty) {
     return _androidKey;
   }

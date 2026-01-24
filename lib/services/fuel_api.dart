@@ -37,27 +37,14 @@ class FuelApi {
   }
 
   Map<String, double> _extractPrices(Map<String, dynamic> raw) {
-    const fields = [
-      'Precio Gasolina 95 E5',
-      'Precio Gasolina 95 E5 Premium',
-      'Precio Gasolina 98 E5',
-      'Precio Gasolina 98 E5 Premium',
-      'Precio Gasoleo A',
-      'Precio Gasoleo Premium',
-      'Precio Gasoleo B',
-      'Precio Gasoleo C',
-      'Precio GNC',
-      'Precio GNL',
-      'Precio GLP',
-    ];
-
     final prices = <String, double>{};
-    for (final field in fields) {
-      final value = _parseDouble(raw[field]);
-      if (value != null && value > 0) {
-        prices[field.replaceAll('Precio ', '')] = value;
-      }
-    }
+    raw.forEach((key, value) {
+      if (key is! String || !key.startsWith('Precio ')) return;
+      final parsed = _parseDouble(value);
+      if (parsed == null || parsed <= 0) return;
+      final label = key.replaceFirst('Precio ', '').trim();
+      prices[label] = parsed;
+    });
     return prices;
   }
 

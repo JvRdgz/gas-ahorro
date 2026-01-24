@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
@@ -60,27 +62,22 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _FuelOption(
       id: FuelOptionId.gasolina95,
       label: 'Gasolina 95',
-      keys: ['Gasolina 95 E5', 'Gasolina 95 E5 Premium'],
     ),
     _FuelOption(
       id: FuelOptionId.gasolina98,
       label: 'Gasolina 98',
-      keys: ['Gasolina 98 E5', 'Gasolina 98 E5 Premium'],
     ),
     _FuelOption(
       id: FuelOptionId.gasoleoA,
       label: 'Gasoleo A / Diesel normal',
-      keys: ['Gasoleo A'],
     ),
     _FuelOption(
       id: FuelOptionId.gasoleoPremium,
       label: 'Gasoleo Premium / Diesel premium',
-      keys: ['Gasoleo Premium'],
     ),
     _FuelOption(
       id: FuelOptionId.gas,
       label: 'GAS / GLP / GNC',
-      keys: ['GLP', 'GNC', 'GNL'],
     ),
   ];
 
@@ -105,7 +102,14 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   double? _lastLng;
   Position? _currentPosition;
   Set<Polyline> _routePolylines = {};
+  List<LatLng> _routePoints = [];
+  List<Station> _routeStations = [];
+  bool _hasRoute = false;
+  double? _destinationLat;
+  double? _destinationLng;
   bool _loadingStations = true;
+  bool _isApplyingFilter = false;
+  bool _filterCheapestOnly = false;
   String? _stationsError;
   String? _stationsErrorDetails;
   List<Station> _stations = [];
@@ -183,6 +187,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text(
+                  'Escribe tu destino para recomendarte gasolineras en ruta.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.black54,
+                      ),
+                ),
+                const SizedBox(height: 8),
                 _SearchBar(
                   controller: _searchController,
                   focusNode: _searchFocusNode,
@@ -196,17 +207,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     onSelected: _onPredictionSelected,
                   ),
                 const SizedBox(height: 10),
-                _FuelSelector(
-                  selected: _selectedFuel,
-                  options: _fuelOptions,
-                  onChanged: _onFuelSelected,
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Escribe tu destino para recomendar gasolineras en ruta',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.black87,
-                      ),
+                _FilterButton(
+                  label: _filterLabel(),
+                  onPressed: _openFuelFilter,
                 ),
               ],
             ),
@@ -239,15 +242,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   const SizedBox(height: 12),
                   FloatingActionButton.extended(
                     heroTag: 'fab-route',
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Pendiente de integrar ruta y geocodificacion.',
-                          ),
-                        ),
-                      );
-                    },
+                    onPressed: _onRoutePressed,
                     icon: const Icon(Icons.alt_route),
                     label: const Text('Ruta'),
                   ),
@@ -256,6 +251,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             ),
           ),
         ),
+        if (_isApplyingFilter)
+          Positioned.fill(
+            child: Container(
+              color: Colors.black26,
+              child: const Center(child: CircularProgressIndicator()),
+            ),
+          ),
       ],
     );
   }
@@ -341,30 +343,152 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     return price;
   }
 
-  void _onFuelSelected(FuelOptionId? selection) {
+  Future<void> _openFuelFilter() async {
+    final result = await showModalBottomSheet<_FilterResult>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        FuelOptionId? tempSelection = _selectedFuel;
+        bool tempCheapestOnly = _filterCheapestOnly;
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
+                top: 8,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Selecciona combustible',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Sin filtro'),
+                        selected: tempSelection == null,
+                        onSelected: (_) => setModalState(() {
+                          tempSelection = null;
+                        }),
+                      ),
+                      ..._fuelOptions.map((option) {
+                        return ChoiceChip(
+                          label: Text(option.label),
+                          selected: tempSelection == option.id,
+                          onSelected: (value) => setModalState(() {
+                            tempSelection = value ? option.id : null;
+                          }),
+                        );
+                      }),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Solo mas baratas'),
+                    subtitle: const Text('Muestra solo el tramo mas economico.'),
+                    value: tempCheapestOnly,
+                    onChanged: (value) => setModalState(() {
+                      tempCheapestOnly = value;
+                    }),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: const Text('Cancelar'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () => Navigator.of(context).pop(
+                            _FilterResult(
+                              fuel: tempSelection,
+                              cheapestOnly: tempCheapestOnly,
+                            ),
+                          ),
+                          child: const Text('Aplicar'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (result == null) return;
+    await _applyFilter(result.fuel, result.cheapestOnly);
+  }
+
+  Future<void> _applyFilter(
+    FuelOptionId? selection,
+    bool cheapestOnly,
+  ) async {
     setState(() {
+      _isApplyingFilter = true;
       _selectedFuel = selection;
+      _filterCheapestOnly = cheapestOnly;
     });
+    await Future<void>.delayed(const Duration(milliseconds: 16));
     _rebuildMarkersForSelection();
+    if (!mounted) return;
+    setState(() {
+      _isApplyingFilter = false;
+    });
   }
 
   void _rebuildMarkersForSelection() {
     if (_stations.isEmpty) return;
+    final baseStations = _hasRoute ? _routeStations : _stations;
+    if (baseStations.isEmpty) {
+      setState(() {
+        _stationMarkers = const {};
+        _minPrice = null;
+        _maxPrice = null;
+      });
+      if (_hasRoute) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No hay estaciones en la ruta.')),
+        );
+      }
+      return;
+    }
+
     if (_selectedFuel == null) {
       setState(() {
-        _stationMarkers = _buildUnselectedMarkers(_stations);
+        _stationMarkers = _buildUnselectedMarkers(baseStations);
         _minPrice = null;
         _maxPrice = null;
       });
       return;
     }
 
-    final prices = _stations
-        .map(_priceForSelectedFuel)
-        .whereType<double>()
+    final pricedStations = baseStations
+        .map((station) {
+          final price = _priceForSelectedFuel(station);
+          if (price == null) return null;
+          return _StationPrice(station: station, price: price);
+        })
+        .whereType<_StationPrice>()
         .toList();
 
-    if (prices.isEmpty) {
+    if (pricedStations.isEmpty) {
       setState(() {
         _stationMarkers = const {};
         _minPrice = null;
@@ -376,9 +500,33 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       return;
     }
 
-    final minPrice = prices.reduce((a, b) => a < b ? a : b);
-    final maxPrice = prices.reduce((a, b) => a > b ? a : b);
-    final markers = _buildMarkersForSelection(_stations, minPrice, maxPrice);
+    var stationsToUse = pricedStations;
+    if (_filterCheapestOnly) {
+      stationsToUse = _filterCheapest(pricedStations);
+      if (stationsToUse.isEmpty) {
+        setState(() {
+          _stationMarkers = const {};
+          _minPrice = null;
+          _maxPrice = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No hay estaciones en el rango barato.')),
+        );
+        return;
+      }
+    }
+
+    final minPrice = stationsToUse
+        .map((entry) => entry.price)
+        .reduce((a, b) => a < b ? a : b);
+    final maxPrice = stationsToUse
+        .map((entry) => entry.price)
+        .reduce((a, b) => a > b ? a : b);
+    final markers = _buildMarkersForSelection(
+      stationsToUse.map((entry) => entry.station).toList(),
+      minPrice,
+      maxPrice,
+    );
 
     setState(() {
       _minPrice = minPrice;
@@ -392,16 +540,19 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   ) {
     final index = <String, Map<FuelOptionId, double>>{};
     for (final station in stations) {
+      final normalizedPrices = <String, double>{};
+      station.prices.forEach((key, value) {
+        normalizedPrices[_normalizeKey(key)] = value;
+      });
       final prices = <FuelOptionId, double>{};
-      for (final option in _fuelOptions) {
-        final values = option.keys
-            .map((key) => station.prices[key])
-            .whereType<double>()
-            .toList();
-        if (values.isNotEmpty) {
-          prices[option.id] = values.reduce((a, b) => a < b ? a : b);
+      normalizedPrices.forEach((key, value) {
+        final fuel = _classifyFuelKey(key);
+        if (fuel == null) return;
+        final existing = prices[fuel];
+        if (existing == null || value < existing) {
+          prices[fuel] = value;
         }
-      }
+      });
       index[station.id] = prices;
     }
     return index;
@@ -420,6 +571,186 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     return _fuelOptions
         .firstWhere((option) => option.id == selection)
         .label;
+  }
+
+  String _filterLabel() {
+    final selection = _selectedFuel;
+    final base = selection == null
+        ? 'Selecciona combustible'
+        : _fuelLabelFor(selection);
+    if (_filterCheapestOnly && selection != null) {
+      return '$base · mas baratas';
+    }
+    return base;
+  }
+
+  Color _markerColorForStation(Station station) {
+    if (_selectedFuel != null && _minPrice != null && _maxPrice != null) {
+      final price = _priceForSelectedFuel(station);
+      if (price != null) {
+        return PriceColor.colorFor(price, _minPrice!, _maxPrice!);
+      }
+    }
+    return HSVColor.fromAHSV(1, _unselectedHue, 0.85, 0.9).toColor();
+  }
+
+  List<_StationPrice> _filterCheapest(List<_StationPrice> entries) {
+    if (entries.isEmpty) return entries;
+    final prices = entries.map((entry) => entry.price).toList()..sort();
+    final cutoffIndex = ((prices.length - 1) * 0.25).round();
+    final cutoff = prices[cutoffIndex];
+    return entries.where((entry) => entry.price <= cutoff).toList();
+  }
+
+  Future<void> _applyRouteFilter(List<LatLng> routePoints) async {
+    if (_stations.isEmpty) return;
+    setState(() {
+      _isApplyingFilter = true;
+    });
+
+    final threshold = _routeThresholdMeters(routePoints);
+    final sampled = _sampleRoute(routePoints, maxPoints: 350);
+    final input = <String, dynamic>{
+      'stationLat':
+          _stations.map((station) => station.lat).toList(growable: false),
+      'stationLng':
+          _stations.map((station) => station.lng).toList(growable: false),
+      'routeLat': sampled.map((point) => point.latitude).toList(growable: false),
+      'routeLng':
+          sampled.map((point) => point.longitude).toList(growable: false),
+      'thresholdMeters': threshold,
+    };
+
+    final indices = await compute(_stationsNearRoute, input);
+    if (!mounted) return;
+    final routeStations = indices.map((i) => _stations[i]).toList();
+
+    setState(() {
+      _routeStations = routeStations;
+      _hasRoute = true;
+      _isApplyingFilter = false;
+    });
+    _rebuildMarkersForSelection();
+  }
+
+  double _routeThresholdMeters(List<LatLng> points) {
+    if (points.length < 2) return 2000;
+    final length = _estimateRouteLengthMeters(points);
+    if (length > 250000) return 5000;
+    if (length > 100000) return 3500;
+    return 2500;
+  }
+
+  double _estimateRouteLengthMeters(List<LatLng> points) {
+    var total = 0.0;
+    for (var i = 1; i < points.length; i++) {
+      total += _distanceMeters(
+        points[i - 1].latitude,
+        points[i - 1].longitude,
+        points[i].latitude,
+        points[i].longitude,
+      );
+    }
+    return total;
+  }
+
+  List<LatLng> _sampleRoute(List<LatLng> points, {int maxPoints = 350}) {
+    if (points.length <= maxPoints) return points;
+    final step = (points.length / maxPoints).ceil();
+    final sampled = <LatLng>[];
+    for (var i = 0; i < points.length; i += step) {
+      sampled.add(points[i]);
+    }
+    if (sampled.last != points.last) {
+      sampled.add(points.last);
+    }
+    return sampled;
+  }
+
+  double _distanceMeters(
+    double lat1,
+    double lng1,
+    double lat2,
+    double lng2,
+  ) {
+    const metersPerDegree = 111320.0;
+    final avgLat = (lat1 + lat2) / 2 * 0.017453292519943295;
+    final dx = (lng2 - lng1) * metersPerDegree * math.cos(avgLat);
+    final dy = (lat2 - lat1) * metersPerDegree;
+    return math.sqrt(dx * dx + dy * dy);
+  }
+
+  String _normalizeKey(String value) {
+    final buffer = StringBuffer();
+    for (final codeUnit in value.toUpperCase().codeUnits) {
+      switch (codeUnit) {
+        case 193: // Á
+        case 192: // À
+        case 194: // Â
+        case 196: // Ä
+          buffer.write('A');
+          break;
+        case 201: // É
+        case 200: // È
+        case 202: // Ê
+        case 203: // Ë
+          buffer.write('E');
+          break;
+        case 205: // Í
+        case 204: // Ì
+        case 206: // Î
+        case 207: // Ï
+          buffer.write('I');
+          break;
+        case 211: // Ó
+        case 210: // Ò
+        case 212: // Ô
+        case 214: // Ö
+          buffer.write('O');
+          break;
+        case 218: // Ú
+        case 217: // Ù
+        case 219: // Û
+        case 220: // Ü
+          buffer.write('U');
+          break;
+        case 209: // Ñ
+          buffer.write('N');
+          break;
+        default:
+          final ch = String.fromCharCode(codeUnit);
+          if (RegExp(r'[A-Z0-9]').hasMatch(ch)) {
+            buffer.write(ch);
+          }
+      }
+    }
+    return buffer.toString();
+  }
+
+  FuelOptionId? _classifyFuelKey(String key) {
+    if (key.contains('GASOLINA95')) {
+      return FuelOptionId.gasolina95;
+    }
+    if (key.contains('GASOLINA98')) {
+      return FuelOptionId.gasolina98;
+    }
+    if (key.contains('GASOLEOPREMIUM') || key.contains('DIESELPREMIUM')) {
+      return FuelOptionId.gasoleoPremium;
+    }
+    if (key.contains('GASOLEOA') || key.contains('DIESEL')) {
+      return FuelOptionId.gasoleoA;
+    }
+    if (key.contains('GLP') ||
+        key.contains('GNC') ||
+        key.contains('GNL') ||
+        key.contains('GASNATURAL') ||
+        key.contains('GASESLICUADOSDELPETROLEO') ||
+        key.contains('AUTOGAS') ||
+        key.contains('BIOGASNATURAL') ||
+        key.contains('GASLICUADO')) {
+      return FuelOptionId.gas;
+    }
+    return null;
   }
 
   Future<void> _loadMapStyle() async {
@@ -533,6 +864,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _sessionToken = _uuid.v4();
       final lat = location['lat']!;
       final lng = location['lng']!;
+      _destinationLat = lat;
+      _destinationLng = lng;
       await _drawRouteToDestination(lat, lng);
       await _mapController?.animateCamera(
         CameraUpdate.newLatLngZoom(LatLng(lat, lng), 11),
@@ -546,11 +879,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   void _showStationSheet(Station station) {
+    final markerColor = _markerColorForStation(station);
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
       builder: (context) => StationSheet(
         station: station,
+        markerColor: markerColor,
         onNavigate: () => _openDefaultNavigation(station),
       ),
     );
@@ -581,13 +916,22 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             points: polylinePoints,
           ),
         };
+        _routePoints = polylinePoints;
+        _hasRoute = polylinePoints.isNotEmpty;
       });
 
       if (polylinePoints.isNotEmpty) {
+        await _applyRouteFilter(polylinePoints);
         final bounds = _boundsFromLatLng(polylinePoints);
         await _mapController?.animateCamera(
           CameraUpdate.newLatLngBounds(bounds, 48),
         );
+      } else {
+        setState(() {
+          _routeStations = [];
+          _hasRoute = false;
+        });
+        _rebuildMarkersForSelection();
       }
     } catch (_) {
       if (!mounted) return;
@@ -660,6 +1004,18 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       ),
     );
   }
+
+  Future<void> _onRoutePressed() async {
+    final lat = _destinationLat;
+    final lng = _destinationLng;
+    if (lat == null || lng == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecciona un destino primero.')),
+      );
+      return;
+    }
+    await _drawRouteToDestination(lat, lng);
+  }
 }
 
 class _SearchBar extends StatelessWidget {
@@ -693,7 +1049,7 @@ class _SearchBar extends StatelessWidget {
         onChanged: onChanged,
         decoration: const InputDecoration(
           prefixIcon: Icon(Icons.search),
-          hintText: 'Destino de tu viaje',
+          hintText: 'Ir a',
           border: InputBorder.none,
           contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
@@ -813,59 +1169,115 @@ class _FuelOption {
   const _FuelOption({
     required this.id,
     required this.label,
-    required this.keys,
   });
 
   final FuelOptionId id;
   final String label;
-  final List<String> keys;
 }
 
-class _FuelSelector extends StatelessWidget {
-  const _FuelSelector({
-    required this.selected,
-    required this.options,
-    required this.onChanged,
+class _FilterResult {
+  const _FilterResult({
+    required this.fuel,
+    required this.cheapestOnly,
   });
 
-  final FuelOptionId? selected;
-  final List<_FuelOption> options;
-  final ValueChanged<FuelOptionId?> onChanged;
+  final FuelOptionId? fuel;
+  final bool cheapestOnly;
+}
+
+class _FilterButton extends StatelessWidget {
+  const _FilterButton({
+    required this.label,
+    required this.onPressed,
+  });
+
+  final String label;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black26,
-            blurRadius: 12,
-            offset: Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          ChoiceChip(
-            label: const Text('Todos'),
-            selected: selected == null,
-            onSelected: (_) => onChanged(null),
-          ),
-          ...options.map((option) {
-            return ChoiceChip(
-              label: Text(option.label),
-              selected: selected == option.id,
-              onSelected: (value) =>
-                  onChanged(value ? option.id : null),
-            );
-          }),
-        ],
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: const Icon(Icons.filter_alt),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
       ),
     );
   }
+}
+
+class _StationPrice {
+  const _StationPrice({
+    required this.station,
+    required this.price,
+  });
+
+  final Station station;
+  final double price;
+}
+
+List<int> _stationsNearRoute(Map<String, dynamic> input) {
+  const metersPerDegree = 111320.0;
+  const degToRad = 0.017453292519943295;
+
+  final stationLat = (input['stationLat'] as List).cast<double>();
+  final stationLng = (input['stationLng'] as List).cast<double>();
+  final routeLat = (input['routeLat'] as List).cast<double>();
+  final routeLng = (input['routeLng'] as List).cast<double>();
+  final threshold = (input['thresholdMeters'] as num).toDouble();
+  final thresholdSq = threshold * threshold;
+
+  if (routeLat.length < 2) return [];
+
+  final indices = <int>[];
+  for (var i = 0; i < stationLat.length; i++) {
+    final lat = stationLat[i];
+    final lng = stationLng[i];
+    var within = false;
+
+    for (var j = 1; j < routeLat.length; j++) {
+      final lat1 = routeLat[j - 1];
+      final lng1 = routeLng[j - 1];
+      final lat2 = routeLat[j];
+      final lng2 = routeLng[j];
+      final avgLat = (lat1 + lat2) / 2 * degToRad;
+      final cosLat = math.cos(avgLat);
+
+      final dx = (lng2 - lng1) * metersPerDegree * cosLat;
+      final dy = (lat2 - lat1) * metersPerDegree;
+      final px = (lng - lng1) * metersPerDegree * cosLat;
+      final py = (lat - lat1) * metersPerDegree;
+
+      final segLen2 = dx * dx + dy * dy;
+      double distSq;
+      if (segLen2 == 0) {
+        distSq = px * px + py * py;
+      } else {
+        var t = (px * dx + py * dy) / segLen2;
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+        final projx = t * dx;
+        final projy = t * dy;
+        final diffx = px - projx;
+        final diffy = py - projy;
+        distSq = diffx * diffx + diffy * diffy;
+      }
+
+      if (distSq <= thresholdSq) {
+        within = true;
+        break;
+      }
+    }
+
+    if (within) {
+      indices.add(i);
+    }
+  }
+  return indices;
 }

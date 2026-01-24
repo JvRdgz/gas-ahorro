@@ -6,10 +6,12 @@ class StationSheet extends StatelessWidget {
   const StationSheet({
     super.key,
     required this.station,
+    required this.markerColor,
     required this.onNavigate,
   });
 
   final Station station;
+  final Color markerColor;
   final VoidCallback onNavigate;
 
   @override
@@ -21,9 +23,25 @@ class StationSheet extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              station.name,
-              style: Theme.of(context).textTheme.titleLarge,
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: markerColor,
+                  child: const Icon(
+                    Icons.local_gas_station,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    station.name,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 6),
             Text(
