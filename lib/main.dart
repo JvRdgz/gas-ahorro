@@ -102,6 +102,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   String _sessionToken = '';
   List<PlacePrediction> _predictions = [];
   bool _loadingPredictions = false;
+  int _autocompleteRequestId = 0;
   String? _darkMapStyle;
   bool? _isNightByLocation;
   double? _lastLat;
@@ -972,33 +973,36 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   void _onSearchChanged(String value) {
     _debounce?.cancel();
+    final query = value.trim();
     _debounce = Timer(const Duration(milliseconds: 350), () {
       if (!mounted) return;
-      if (value.trim().length < 3) {
+      if (query.length < 3) {
+        _autocompleteRequestId++;
         setState(() {
           _predictions = [];
           _loadingPredictions = false;
         });
         return;
       }
-      _fetchPredictions(value.trim());
+      _fetchPredictions(query);
     });
   }
 
   Future<void> _fetchPredictions(String input) async {
+    final requestId = ++_autocompleteRequestId;
     setState(() => _loadingPredictions = true);
     try {
       final results = await _placesApi.autocomplete(
         input: input,
         sessionToken: _sessionToken,
       );
-      if (!mounted) return;
+      if (!mounted || requestId != _autocompleteRequestId) return;
       setState(() {
         _predictions = results;
         _loadingPredictions = false;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || requestId != _autocompleteRequestId) return;
       setState(() {
         _predictions = [];
         _loadingPredictions = false;
@@ -1052,7 +1056,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _drawRouteToDestination(double destLat, double destLng) async {
-    final current = _currentPosition;
+    final current = _currentPosition ?? await _ensureCurrentPosition();
     if (current == null) return;
 
     try {
@@ -1162,6 +1166,43 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         13,
       ),
     );
+  }
+
+  Future<Position?> _ensureCurrentPosition() async {
+    if (_currentPosition != null) return _currentPosition;
+
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Activa los servicios de ubicación.')),
+        );
+      }
+      return null;
+    }
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Permiso de ubicación denegado.')),
+        );
+      }
+      return null;
+    }
+
+    final position = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
+    _currentPosition = position;
+    _lastLat = position.latitude;
+    _lastLng = position.longitude;
+    await _refreshNightMode(position.latitude, position.longitude);
+    return position;
   }
 
   Future<void> _onRoutePressed() async {

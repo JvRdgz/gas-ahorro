@@ -27,14 +27,24 @@ class PlacesApi {
       'sessiontoken': sessionToken,
     });
 
-    final response = await http.get(uri);
+    final headers = googleMapsWebServiceHeaders;
+    final response = await http.get(
+      uri,
+      headers: headers.isEmpty ? null : headers,
+    );
     if (response.statusCode != 200) {
+      // Debug: log response without exposing the API key.
+      // ignore: avoid_print
+      print('Places Autocomplete HTTP ${response.statusCode}: ${response.body}');
       throw Exception('Error en Autocomplete (${response.statusCode}).');
     }
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final status = data['status']?.toString();
     if (status != 'OK' && status != 'ZERO_RESULTS') {
+      // Debug: log error status to diagnose API restrictions/quota.
+      // ignore: avoid_print
+      print('Places Autocomplete status: $status, error: ${data['error_message']}');
       throw Exception('Autocomplete status: $status');
     }
 
@@ -67,14 +77,22 @@ class PlacesApi {
       'sessiontoken': sessionToken,
     });
 
-    final response = await http.get(uri);
+    final headers = googleMapsWebServiceHeaders;
+    final response = await http.get(
+      uri,
+      headers: headers.isEmpty ? null : headers,
+    );
     if (response.statusCode != 200) {
+      // ignore: avoid_print
+      print('Place Details HTTP ${response.statusCode}: ${response.body}');
       throw Exception('Error en Place Details (${response.statusCode}).');
     }
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final status = data['status']?.toString();
     if (status != 'OK') {
+      // ignore: avoid_print
+      print('Place Details status: $status, error: ${data['error_message']}');
       throw Exception('Place Details status: $status');
     }
 
