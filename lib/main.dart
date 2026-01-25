@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -306,12 +305,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       });
       if (_selectedFuel != null) {
         await _rebuildMarkersForSelection();
-      } else if (Platform.isIOS) {
-        await _setMarkersInBatches(stations);
       } else {
-        setState(() {
-          _stationMarkers = _buildUnselectedMarkers(stations);
-        });
+        await _setMarkersInBatches(_buildUnselectedMarkers(stations));
       }
     } catch (error) {
       if (!mounted) return;
@@ -332,20 +327,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         onTap: () => _showStationSheet(station),
       );
     }).toSet();
-  }
-
-  Future<void> _setMarkersInBatches(List<Station> stations) async {
-    const batchSize = 400;
-    final markers = <Marker>{};
-    for (var i = 0; i < stations.length; i += batchSize) {
-      final end = math.min(i + batchSize, stations.length);
-      markers.addAll(_buildUnselectedMarkers(stations.sublist(i, end)));
-      if (!mounted) return;
-      setState(() {
-        _stationMarkers = Set<Marker>.of(markers);
-      });
-      await Future<void>.delayed(const Duration(milliseconds: 16));
-    }
   }
 
   Set<Marker> _buildMarkersForSelection(
@@ -550,10 +531,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
     if (_selectedFuel == null) {
       setState(() {
-        _stationMarkers = _buildUnselectedMarkers(baseStations);
         _minPrice = null;
         _maxPrice = null;
       });
+      await _setMarkersInBatches(_buildUnselectedMarkers(baseStations));
       return;
     }
 
@@ -605,11 +586,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       minPrice,
       maxPrice,
     );
+    await _setMarkersInBatches(markers);
 
     setState(() {
       _minPrice = minPrice;
       _maxPrice = maxPrice;
-      _stationMarkers = markers;
     });
   }
 
@@ -634,6 +615,21 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       index[station.id] = prices;
     }
     return index;
+  }
+
+  Future<void> _setMarkersInBatches(Iterable<Marker> markers) async {
+    const batchSize = 400;
+    final list = markers.toList(growable: false);
+    final result = <Marker>{};
+    for (var i = 0; i < list.length; i += batchSize) {
+      final end = math.min(i + batchSize, list.length);
+      result.addAll(list.sublist(i, end));
+      if (!mounted) return;
+      setState(() {
+        _stationMarkers = Set<Marker>.of(result);
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
   }
 
   BitmapDescriptor _iconForHue(double hue) {
