@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -293,8 +294,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         return;
       }
 
-      final markers = _buildUnselectedMarkers(stations);
-
       setState(() {
         _stations = stations;
         _stationFuelPrices
@@ -302,11 +301,17 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           ..addAll(_buildFuelPriceIndex(stations));
         _minPrice = null;
         _maxPrice = null;
-        _stationMarkers = markers;
+        _stationMarkers = const {};
         _loadingStations = false;
       });
       if (_selectedFuel != null) {
         await _rebuildMarkersForSelection();
+      } else if (Platform.isIOS) {
+        await _setMarkersInBatches(stations);
+      } else {
+        setState(() {
+          _stationMarkers = _buildUnselectedMarkers(stations);
+        });
       }
     } catch (error) {
       if (!mounted) return;
@@ -327,6 +332,20 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         onTap: () => _showStationSheet(station),
       );
     }).toSet();
+  }
+
+  Future<void> _setMarkersInBatches(List<Station> stations) async {
+    const batchSize = 400;
+    final markers = <Marker>{};
+    for (var i = 0; i < stations.length; i += batchSize) {
+      final end = math.min(i + batchSize, stations.length);
+      markers.addAll(_buildUnselectedMarkers(stations.sublist(i, end)));
+      if (!mounted) return;
+      setState(() {
+        _stationMarkers = Set<Marker>.of(markers);
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
   }
 
   Set<Marker> _buildMarkersForSelection(
