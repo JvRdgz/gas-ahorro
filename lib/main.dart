@@ -184,7 +184,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               _refreshVisibleMarkers();
             }
           },
-          onCameraIdle: _refreshVisibleMarkers,
+          onCameraIdle: _onCameraIdle,
           myLocationEnabled: true,
           myLocationButtonEnabled: false,
           markers: _stationMarkers,
@@ -639,6 +639,16 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _markerMinPrice = minPrice;
     _markerMaxPrice = maxPrice;
     await _refreshVisibleMarkers();
+  }
+
+  void _onCameraIdle() {
+    if (!_shouldRefreshOnCameraIdle()) return;
+    _refreshVisibleMarkers();
+  }
+
+  bool _shouldRefreshOnCameraIdle() {
+    return defaultTargetPlatform == TargetPlatform.iOS &&
+        _markerStationsSource.length > _iosViewportThreshold;
   }
 
   Future<void> _refreshVisibleMarkers() async {
