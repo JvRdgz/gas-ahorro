@@ -25,7 +25,7 @@ flutter:
     - assets/map_style_dark.json
     - assets/icon/logo.png
     - assets/splash/splash.png
-    - assets/splash/splash_android12.png
+    - assets/splash/splash_background.png
 
 flutter_launcher_icons:
   android: true
@@ -36,13 +36,13 @@ flutter_launcher_icons:
   remove_alpha_ios: true
 
 flutter_native_splash:
-  color: "#0B3A2B"
-  background_image: assets/splash/splash.png
+  background_image: assets/splash/splash_background.png
+  image: assets/icon/logo.png
   android_gravity: fill
   ios_content_mode: scaleAspectFill
   android: true
   ios: true
   android_12:
     color: "#0B3A2B"
-    image: assets/splash/splash_android12.png
+    image: assets/icon/logo.png
     icon_background_color: "#0B3A2B"

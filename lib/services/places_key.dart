@@ -24,7 +24,6 @@ const _iosBundleId = String.fromEnvironment(
   'IOS_BUNDLE_ID',
   defaultValue: '',
 );
-bool _loggedMapsKeyInfo = false;
 
 String get googleMapsApiKey {
   String key;
@@ -39,15 +38,6 @@ String get googleMapsApiKey {
   }
 
   key = key.trim();
-  if (!_loggedMapsKeyInfo) {
-    _loggedMapsKeyInfo = true;
-    // Log only a suffix to avoid exposing the full key.
-    // ignore: avoid_print
-    print(
-      'Maps key suffix: ${key.isEmpty ? "empty" : key.substring(key.length - 4)} '
-      'platform=${Platform.isAndroid ? "android" : Platform.isIOS ? "ios" : "other"}',
-    );
-  }
   return key;
 }
 
@@ -60,23 +50,15 @@ Map<String, String> get googleMapsWebServiceHeaders {
       .toUpperCase();
   final iosBundleId = _iosBundleId.trim();
   if (Platform.isAndroid && androidPackage.isNotEmpty && androidSha1.isNotEmpty) {
-    // ignore: avoid_print
-    print(
-      'Maps headers: Android package=$androidPackage cert=${androidSha1.isNotEmpty ? "set" : "empty"}',
-    );
     return {
       'X-Android-Package': androidPackage,
       'X-Android-Cert': androidSha1,
     };
   }
   if (Platform.isIOS && iosBundleId.isNotEmpty) {
-    // ignore: avoid_print
-    print('Maps headers: iOS bundle=$iosBundleId');
     return {
       'X-Ios-Bundle-Identifier': iosBundleId,
     };
   }
-  // ignore: avoid_print
-  print('Maps headers: empty (missing package/bundle or cert).');
   return {};
 }

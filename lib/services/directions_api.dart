@@ -31,16 +31,12 @@ class DirectionsApi {
       headers: headers.isEmpty ? null : headers,
     );
     if (response.statusCode != 200) {
-      // ignore: avoid_print
-      print('Directions HTTP ${response.statusCode}: ${response.body}');
       throw Exception('Error en Directions (${response.statusCode}).');
     }
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final status = data['status']?.toString();
     if (status != 'OK') {
-      // ignore: avoid_print
-      print('Directions status: $status, error: ${data['error_message']}');
       throw Exception('Directions status: $status');
     }
 
