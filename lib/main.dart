@@ -60,6 +60,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   static const Color _brandGreenDark = Color(0xFF0B6E4F);
   static const Color _brandGreenLight = Color(0xFF57D39D);
   static const int _iosViewportThreshold = 1500;
+  static const int _viewportFilterThreshold = 700;
+  static const int _downsampleThreshold = 500;
 
   static const List<_FuelOption> _fuelOptions = [
     _FuelOption(
@@ -643,13 +645,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   void _onCameraIdle() {
-    if (!_shouldRefreshOnCameraIdle()) return;
+    if (!mounted || _markerStationsSource.isEmpty) return;
     _refreshVisibleMarkers();
-  }
-
-  bool _shouldRefreshOnCameraIdle() {
-    return defaultTargetPlatform == TargetPlatform.iOS &&
-        _markerStationsSource.length > _iosViewportThreshold;
   }
 
   Future<void> _refreshVisibleMarkers() async {
@@ -658,18 +655,16 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (controller == null) return;
 
     var stationsToRender = _markerStationsSource;
-    if (defaultTargetPlatform == TargetPlatform.iOS &&
-        stationsToRender.length > _iosViewportThreshold) {
-      final bounds = await controller.getVisibleRegion();
-      stationsToRender = stationsToRender.where((station) {
-        final lat = station.lat;
-        final lng = station.lng;
-        return lat <= bounds.northeast.latitude &&
-            lat >= bounds.southwest.latitude &&
-            lng <= bounds.northeast.longitude &&
-            lng >= bounds.southwest.longitude;
-      }).toList();
+    final bounds = await controller.getVisibleRegion();
+    final zoom = await controller.getZoomLevel();
+    if (stationsToRender.length > _viewportFilterThreshold ||
+        (defaultTargetPlatform == TargetPlatform.iOS &&
+            stationsToRender.length > _iosViewportThreshold)) {
+      final paddedBounds = _expandBounds(bounds, 0.2);
+      stationsToRender = _stationsInBounds(stationsToRender, paddedBounds);
     }
+
+    stationsToRender = _downsampleForZoom(stationsToRender, zoom, bounds);
 
     final minPrice = _markerMinPrice;
     final maxPrice = _markerMaxPrice;
@@ -677,6 +672,95 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         ? _buildMarkersForSelection(stationsToRender, minPrice, maxPrice)
         : _buildUnselectedMarkers(stationsToRender);
     await _setMarkersInBatches(markers);
+  }
+
+  LatLngBounds _expandBounds(LatLngBounds bounds, double factor) {
+    final latSpan = bounds.northeast.latitude - bounds.southwest.latitude;
+    final lngSpan = bounds.northeast.longitude - bounds.southwest.longitude;
+    final latPad = latSpan * factor;
+    final lngPad = lngSpan * factor;
+    return LatLngBounds(
+      southwest: LatLng(
+        bounds.southwest.latitude - latPad,
+        bounds.southwest.longitude - lngPad,
+      ),
+      northeast: LatLng(
+        bounds.northeast.latitude + latPad,
+        bounds.northeast.longitude + lngPad,
+      ),
+    );
+  }
+
+  List<Station> _stationsInBounds(
+    List<Station> stations,
+    LatLngBounds bounds,
+  ) {
+    return stations.where((station) {
+      final lat = station.lat;
+      final lng = station.lng;
+      return lat <= bounds.northeast.latitude &&
+          lat >= bounds.southwest.latitude &&
+          lng <= bounds.northeast.longitude &&
+          lng >= bounds.southwest.longitude;
+    }).toList(growable: false);
+  }
+
+  List<Station> _downsampleForZoom(
+    List<Station> stations,
+    double zoom,
+    LatLngBounds bounds,
+  ) {
+    final cellSizeMeters = _cellSizeMetersForZoom(zoom);
+    if (cellSizeMeters <= 0 || stations.length <= _downsampleThreshold) {
+      return stations;
+    }
+
+    final midLat =
+        (bounds.northeast.latitude + bounds.southwest.latitude) / 2;
+    final metersPerDegreeLat = 111320.0;
+    final metersPerDegreeLng =
+        math.max(1e-6, 111320.0 * math.cos(midLat * math.pi / 180));
+    final cellLat = cellSizeMeters / metersPerDegreeLat;
+    final cellLng = cellSizeMeters / metersPerDegreeLng;
+
+    final preferCheapest = _selectedFuel != null;
+    final buckets = <String, Station>{};
+    final bucketPrice = <String, double>{};
+
+    for (final station in stations) {
+      final key =
+          '${(station.lat / cellLat).floor()}_${(station.lng / cellLng).floor()}';
+      if (!preferCheapest) {
+        buckets.putIfAbsent(key, () => station);
+        continue;
+      }
+      final price = _priceForSelectedFuel(station);
+      if (price == null) continue;
+      final existing = bucketPrice[key];
+      if (existing == null || price < existing) {
+        buckets[key] = station;
+        bucketPrice[key] = price;
+      }
+    }
+
+    if (buckets.isEmpty) {
+      return stations;
+    }
+    return buckets.values.toList(growable: false);
+  }
+
+  double _cellSizeMetersForZoom(double zoom) {
+    if (zoom < 6) return 45000;
+    if (zoom < 7) return 30000;
+    if (zoom < 8) return 20000;
+    if (zoom < 9) return 12000;
+    if (zoom < 10) return 8000;
+    if (zoom < 11) return 5000;
+    if (zoom < 12) return 2500;
+    if (zoom < 13) return 1500;
+    if (zoom < 14) return 900;
+    if (zoom < 15) return 500;
+    return 0;
   }
 
   Future<void> _runWithFilterLoading(Future<void> Function() action) async {
