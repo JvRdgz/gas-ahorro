@@ -59,6 +59,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   static const double _unselectedHue = BitmapDescriptor.hueAzure;
   static const Color _brandGreenDark = Color(0xFF0B6E4F);
   static const Color _brandGreenLight = Color(0xFF57D39D);
+  static const int _iosViewportThreshold = 1500;
 
   static const List<_FuelOption> _fuelOptions = [
     _FuelOption(
@@ -93,6 +94,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   final _uuid = const Uuid();
 
   GoogleMapController? _mapController;
+  List<Station> _markerStationsSource = const [];
+  double? _markerMinPrice;
+  double? _markerMaxPrice;
   Timer? _debounce;
   Timer? _nightTimer;
   String _sessionToken = '';
@@ -176,7 +180,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           onMapCreated: (controller) {
             _mapController = controller;
             _applyMapStyle();
+            if (_markerStationsSource.isNotEmpty) {
+              _refreshVisibleMarkers();
+            }
           },
+          onCameraIdle: _refreshVisibleMarkers,
           myLocationEnabled: true,
           myLocationButtonEnabled: false,
           markers: _stationMarkers,
@@ -301,13 +309,17 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         _minPrice = null;
         _maxPrice = null;
         _stationMarkers = const {};
-        _loadingStations = false;
+        _loadingStations = true;
       });
       if (_selectedFuel != null) {
         await _rebuildMarkersForSelection();
       } else {
-        await _setMarkersInBatches(_buildUnselectedMarkers(stations));
+        await _setMarkersForStations(stations);
       }
+      if (!mounted) return;
+      setState(() {
+        _loadingStations = false;
+      });
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -459,18 +471,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                       const SizedBox(width: 12),
                       Expanded(
                         child: FilledButton(
-                          onPressed: () {
-                            if (!mounted) return;
-                            setState(() {
-                              _isApplyingFilter = true;
-                            });
-                            Navigator.of(context).pop(
-                              _FilterResult(
-                                fuel: tempSelection,
-                                cheapestOnly: tempCheapestOnly,
-                              ),
-                            );
-                          },
+                          onPressed: () => Navigator.of(context).pop(
+                            _FilterResult(
+                              fuel: tempSelection,
+                              cheapestOnly: tempCheapestOnly,
+                            ),
+                          ),
                           child: const Text('Aplicar'),
                           style: FilledButton.styleFrom(
                             backgroundColor: palette.accent,
@@ -499,17 +505,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     bool cheapestOnly,
   ) async {
     setState(() {
-      _isApplyingFilter = true;
       _selectedFuel = selection;
       _filterCheapestOnly = cheapestOnly;
     });
-    await Future<void>.delayed(Duration.zero);
-    await WidgetsBinding.instance.endOfFrame;
-    await _rebuildMarkersForSelection();
-    if (!mounted) return;
-    setState(() {
-      _isApplyingFilter = false;
-    });
+    await _runWithFilterLoading(_rebuildMarkersForSelection);
   }
 
   Future<void> _rebuildMarkersForSelection() async {
@@ -534,7 +533,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         _minPrice = null;
         _maxPrice = null;
       });
-      await _setMarkersInBatches(_buildUnselectedMarkers(baseStations));
+      await _setMarkersForStations(baseStations);
       return;
     }
 
@@ -581,12 +580,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     final minPrice = (result['minPrice'] as num).toDouble();
     final maxPrice = (result['maxPrice'] as num).toDouble();
     final stationsToUse = indices.map((i) => baseStations[i]).toList();
-    final markers = _buildMarkersForSelection(
+    await _setMarkersForStations(
       stationsToUse,
-      minPrice,
-      maxPrice,
+      minPrice: minPrice,
+      maxPrice: maxPrice,
     );
-    await _setMarkersInBatches(markers);
 
     setState(() {
       _minPrice = minPrice;
@@ -632,6 +630,66 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _setMarkersForStations(
+    List<Station> stations, {
+    double? minPrice,
+    double? maxPrice,
+  }) async {
+    _markerStationsSource = stations;
+    _markerMinPrice = minPrice;
+    _markerMaxPrice = maxPrice;
+    await _refreshVisibleMarkers();
+  }
+
+  Future<void> _refreshVisibleMarkers() async {
+    final controller = _mapController;
+    if (!mounted) return;
+    if (controller == null) return;
+
+    var stationsToRender = _markerStationsSource;
+    if (defaultTargetPlatform == TargetPlatform.iOS &&
+        stationsToRender.length > _iosViewportThreshold) {
+      final bounds = await controller.getVisibleRegion();
+      stationsToRender = stationsToRender.where((station) {
+        final lat = station.lat;
+        final lng = station.lng;
+        return lat <= bounds.northeast.latitude &&
+            lat >= bounds.southwest.latitude &&
+            lng <= bounds.northeast.longitude &&
+            lng >= bounds.southwest.longitude;
+      }).toList();
+    }
+
+    final minPrice = _markerMinPrice;
+    final maxPrice = _markerMaxPrice;
+    final markers = (minPrice != null && maxPrice != null)
+        ? _buildMarkersForSelection(stationsToRender, minPrice, maxPrice)
+        : _buildUnselectedMarkers(stationsToRender);
+    await _setMarkersInBatches(markers);
+  }
+
+  Future<void> _runWithFilterLoading(Future<void> Function() action) async {
+    if (!mounted) return;
+    setState(() {
+      _isApplyingFilter = true;
+    });
+    await Future<void>.delayed(Duration.zero);
+    await WidgetsBinding.instance.endOfFrame;
+
+    final stopwatch = Stopwatch()..start();
+    await action();
+    if (!mounted) return;
+
+    final remaining = 300 - stopwatch.elapsedMilliseconds;
+    if (remaining > 0) {
+      await Future<void>.delayed(Duration(milliseconds: remaining));
+    }
+    if (!mounted) return;
+    setState(() {
+      _isApplyingFilter = false;
+    });
+  }
+
   BitmapDescriptor _iconForHue(double hue) {
     final bucketed = (hue / 5).round() * 5.0;
     return _iconCache.putIfAbsent(
@@ -670,35 +728,30 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   Future<void> _applyRouteFilter(List<LatLng> routePoints) async {
     if (_stations.isEmpty) return;
-    setState(() {
-      _isApplyingFilter = true;
-    });
+    await _runWithFilterLoading(() async {
+      final threshold = _routeThresholdMeters(routePoints);
+      final sampled = _sampleRoute(routePoints, maxPoints: 350);
+      final input = <String, dynamic>{
+        'stationLat':
+            _stations.map((station) => station.lat).toList(growable: false),
+        'stationLng':
+            _stations.map((station) => station.lng).toList(growable: false),
+        'routeLat':
+            sampled.map((point) => point.latitude).toList(growable: false),
+        'routeLng':
+            sampled.map((point) => point.longitude).toList(growable: false),
+        'thresholdMeters': threshold,
+      };
 
-    final threshold = _routeThresholdMeters(routePoints);
-    final sampled = _sampleRoute(routePoints, maxPoints: 350);
-    final input = <String, dynamic>{
-      'stationLat':
-          _stations.map((station) => station.lat).toList(growable: false),
-      'stationLng':
-          _stations.map((station) => station.lng).toList(growable: false),
-      'routeLat': sampled.map((point) => point.latitude).toList(growable: false),
-      'routeLng':
-          sampled.map((point) => point.longitude).toList(growable: false),
-      'thresholdMeters': threshold,
-    };
+      final indices = await compute(_stationsNearRoute, input);
+      if (!mounted) return;
+      final routeStations = indices.map((i) => _stations[i]).toList();
 
-    final indices = await compute(_stationsNearRoute, input);
-    if (!mounted) return;
-    final routeStations = indices.map((i) => _stations[i]).toList();
-
-    setState(() {
-      _routeStations = routeStations;
-      _hasRoute = true;
-    });
-    await _rebuildMarkersForSelection();
-    if (!mounted) return;
-    setState(() {
-      _isApplyingFilter = false;
+      setState(() {
+        _routeStations = routeStations;
+        _hasRoute = true;
+      });
+      await _rebuildMarkersForSelection();
     });
   }
 
