@@ -182,7 +182,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         media.size.height - media.viewInsets.bottom - viewPadding.top - 220,
       ),
     );
-    const fabExtraBottom = 72.0;
 
     return Stack(
       children: [
