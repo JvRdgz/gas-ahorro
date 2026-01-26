@@ -173,12 +173,27 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       );
     }
 
+    final media = MediaQuery.of(context);
+    final viewPadding = media.padding;
+    final maxSuggestionsHeight = math.max(
+      120.0,
+      math.min(
+        240.0,
+        media.size.height - media.viewInsets.bottom - viewPadding.top - 220,
+      ),
+    );
+    const fabExtraBottom = 72.0;
+
     return Stack(
       children: [
         GoogleMap(
           initialCameraPosition: CameraPosition(
             target: LatLng(_stations.first.lat, _stations.first.lng),
             zoom: 6,
+          ),
+          padding: EdgeInsets.only(
+            top: viewPadding.top,
+            bottom: viewPadding.bottom + 12,
           ),
           onMapCreated: (controller) {
             _mapController = controller;
@@ -219,6 +234,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                     predictions: _predictions,
                     onSelected: _onPredictionSelected,
                     palette: _palette,
+                    maxHeight: maxSuggestionsHeight,
                   ),
                 const SizedBox(height: 10),
                 _FilterButton(
@@ -233,7 +249,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         if (_selectedFuel != null && _minPrice != null && _maxPrice != null)
           Positioned(
             left: 16,
-            bottom: 24,
+            bottom: 24 + viewPadding.bottom,
             child: PriceLegend(
               minPrice: _minPrice!,
               maxPrice: _maxPrice!,
@@ -249,9 +265,14 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           ),
         Positioned.fill(
           child: SafeArea(
-            minimum: const EdgeInsets.all(16),
+            minimum: const EdgeInsets.fromLTRB(
+              16,
+              16,
+              16,
+              16 + fabExtraBottom,
+            ),
             child: Align(
-              alignment: Alignment.bottomRight,
+              alignment: Alignment.centerRight,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.end,
@@ -381,11 +402,14 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         bool tempCheapestOnly = _filterCheapestOnly;
         return StatefulBuilder(
           builder: (context, setModalState) {
+            final media = MediaQuery.of(context);
+            final bottomInset =
+                16 + media.viewInsets.bottom + media.viewPadding.bottom;
             return Padding(
               padding: EdgeInsets.only(
                 left: 16,
                 right: 16,
-                bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
+                bottom: bottomInset,
                 top: 8,
               ),
               child: Column(
@@ -1354,12 +1378,14 @@ class _PredictionsList extends StatelessWidget {
     required this.predictions,
     required this.onSelected,
     required this.palette,
+    required this.maxHeight,
   });
 
   final bool isLoading;
   final List<PlacePrediction> predictions;
   final ValueChanged<PlacePrediction> onSelected;
   final _MapUiPalette palette;
+  final double maxHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -1376,7 +1402,7 @@ class _PredictionsList extends StatelessWidget {
           ),
         ],
       ),
-      constraints: const BoxConstraints(maxHeight: 240),
+      constraints: BoxConstraints(maxHeight: maxHeight),
       child: isLoading
           ? const Padding(
               padding: EdgeInsets.all(16),
