@@ -263,35 +263,26 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               borderColor: _palette.border,
             ),
           ),
-        Positioned.fill(
-          child: SafeArea(
-            minimum: const EdgeInsets.fromLTRB(
-              16,
-              16,
-              16,
-              16 + fabExtraBottom,
-            ),
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  FloatingActionButton(
-                    heroTag: 'fab-location',
-                    onPressed: _centerOnUser,
-                    child: const Icon(Icons.my_location),
-                  ),
-                  const SizedBox(height: 12),
-                  FloatingActionButton.extended(
-                    heroTag: 'fab-route',
-                    onPressed: _onRoutePressed,
-                    icon: const Icon(Icons.alt_route),
-                    label: const Text('Ruta'),
-                  ),
-                ],
+        Positioned(
+          right: 16,
+          bottom: viewPadding.bottom + 140,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              FloatingActionButton(
+                heroTag: 'fab-location',
+                onPressed: _centerOnUser,
+                child: const Icon(Icons.my_location),
               ),
-            ),
+              const SizedBox(height: 12),
+              FloatingActionButton.extended(
+                heroTag: 'fab-route',
+                onPressed: _onRoutePressed,
+                icon: const Icon(Icons.alt_route),
+                label: const Text('Ruta'),
+              ),
+            ],
           ),
         ),
         if (_isApplyingFilter)
