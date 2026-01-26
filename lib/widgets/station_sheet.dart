@@ -17,8 +17,13 @@ class StationSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          12,
+          16,
+          8 + MediaQuery.of(context).viewPadding.bottom,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -55,7 +60,9 @@ class StationSheet extends StatelessWidget {
                 runSpacing: 8,
                 children: station.prices.entries.map((entry) {
                   return Chip(
-                    label: Text('${entry.key}: ${entry.value.toStringAsFixed(3)}'),
+                    label: Text(
+                      '${entry.key}: ${entry.value.toStringAsFixed(3)}',
+                    ),
                   );
                 }).toList(),
               )
@@ -64,7 +71,7 @@ class StationSheet extends StatelessWidget {
                 'Sin precios disponibles.',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(

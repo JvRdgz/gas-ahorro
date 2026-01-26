@@ -276,12 +276,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 child: const Icon(Icons.my_location),
               ),
               const SizedBox(height: 12),
-              FloatingActionButton.extended(
-                heroTag: 'fab-route',
-                onPressed: _onRoutePressed,
-                icon: const Icon(Icons.alt_route),
-                label: const Text('Ruta'),
-              ),
+                  FloatingActionButton.extended(
+                    heroTag: 'fab-route',
+                    onPressed: _onRoutePressed,
+                    icon: Icon(_hasRoute ? Icons.close : Icons.alt_route),
+                    label: Text(_hasRoute ? 'Quitar ruta' : 'Ruta'),
+                  ),
             ],
           ),
         ),
@@ -1146,6 +1146,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (context) => StationSheet(
         station: station,
         markerColor: markerColor,
@@ -1305,6 +1306,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _onRoutePressed() async {
+    if (_hasRoute) {
+      await _clearRoute();
+      return;
+    }
     final lat = _destinationLat;
     final lng = _destinationLng;
     if (lat == null || lng == null) {
@@ -1314,6 +1319,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       return;
     }
     await _drawRouteToDestination(lat, lng);
+  }
+
+  Future<void> _clearRoute() async {
+    setState(() {
+      _routePolylines = {};
+      _routeStations = [];
+      _hasRoute = false;
+    });
+    await _rebuildMarkersForSelection();
   }
 }
 
