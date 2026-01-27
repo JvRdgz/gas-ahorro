@@ -57,6 +57,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.4.2"
+  clock:
+    dependency: transitive
+    description:
+      name: clock
+      sha256: fddb70d9b5277016c77a80201021d40a2247104d9f4aa7bab7157b7e3f05b84b
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.2"
   collection:
     dependency: transitive
     description:
@@ -81,6 +89,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.2"
+  dbus:
+    dependency: transitive
+    description:
+      name: dbus
+      sha256: "79e0c23480ff85dc68de79e2cd6334add97e48f7f4865d17686dd6ea81a47e8c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.7.11"
   ffi:
     dependency: transitive
     description:
@@ -106,10 +122,10 @@ packages:
     dependency: "direct dev"
     description:
       name: flutter_launcher_icons
-      sha256: "526faf84284b86a4cb36d20a5e45147747b7563d921373d4ee0559c54fcdbcea"
+      sha256: "10f13781741a2e3972126fae08393d3c4e01fa4cd7473326b94b72cf594195e7"
       url: "https://pub.dev"
     source: hosted
-    version: "0.13.1"
+    version: "0.14.4"
   flutter_native_splash:
     dependency: "direct dev"
     description:
@@ -122,31 +138,39 @@ packages:
     dependency: transitive
     description:
       name: flutter_plugin_android_lifecycle
-      sha256: c2fe1001710127dfa7da89977a08d591398370d099aacdaa6d44da7eb14b8476
+      sha256: ee8068e0e1cd16c4a82714119918efdeed33b3ba7772c54b5d094ab53f9b7fd1
       url: "https://pub.dev"
     source: hosted
-    version: "2.0.31"
+    version: "2.0.33"
   flutter_web_plugins:
     dependency: transitive
     description: flutter
     source: sdk
     version: "0.0.0"
+  geoclue:
+    dependency: transitive
+    description:
+      name: geoclue
+      sha256: c2a998c77474fc57aa00c6baa2928e58f4b267649057a1c76738656e9dbd2a7f
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.1"
   geolocator:
     dependency: "direct main"
     description:
       name: geolocator
-      sha256: "149876cc5207a0f5daf4fdd3bfcf0a0f27258b3fe95108fa084f527ad0568f1b"
+      sha256: "79939537046c9025be47ec645f35c8090ecadb6fe98eba146a0d25e8c1357516"
       url: "https://pub.dev"
     source: hosted
-    version: "12.0.0"
+    version: "14.0.2"
   geolocator_android:
     dependency: transitive
     description:
       name: geolocator_android
-      sha256: fcb1760a50d7500deca37c9a666785c047139b5f9ee15aa5469fae7dbbe3170d
+      sha256: "179c3cb66dfa674fc9ccbf2be872a02658724d1c067634e2c427cf6df7df901a"
       url: "https://pub.dev"
     source: hosted
-    version: "4.6.2"
+    version: "5.0.2"
   geolocator_apple:
     dependency: transitive
     description:
@@ -155,6 +179,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.3.13"
+  geolocator_linux:
+    dependency: transitive
+    description:
+      name: geolocator_linux
+      sha256: d64112a205931926f4363bb6bd48f14cb38e7326833041d170615586cd143797
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.4"
   geolocator_platform_interface:
     dependency: transitive
     description:
@@ -199,18 +231,18 @@ packages:
     dependency: transitive
     description:
       name: google_maps_flutter_android
-      sha256: "7c7ff5b883b27bfdd0d52d91d89faf00858a6c1b33aeca0dc80faca64f389983"
+      sha256: "98d7f5354f770f3e993db09fc798d40aeb6a254f04c1c468a94818ec2086e83e"
       url: "https://pub.dev"
     source: hosted
-    version: "2.18.3"
+    version: "2.18.12"
   google_maps_flutter_ios:
     dependency: transitive
     description:
       name: google_maps_flutter_ios
-      sha256: "16fb8f913a7575d6f9156e43401e7ba5f7766d58f4d250580f4f983dba16bdb3"
+      sha256: "72812231d1c2051a42f1ae82e2860eb761d4b0c01a5d59213d399521fcb8a8d3"
       url: "https://pub.dev"
     source: hosted
-    version: "2.16.0"
+    version: "2.17.0"
   google_maps_flutter_platform_interface:
     dependency: transitive
     description:
@@ -227,6 +259,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.5.14+3"
+  gsettings:
+    dependency: transitive
+    description:
+      name: gsettings
+      sha256: "1b0ce661f5436d2db1e51f3c4295a49849f03d304003a7ba177d01e3a858249c"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.8"
   html:
     dependency: transitive
     description:
@@ -279,10 +319,26 @@ packages:
     dependency: transitive
     description:
       name: meta
-      sha256: e3641ec5d63ebf0d9b41bd43201a66e3fc79a65db5f61fc181f04cd27aab950c
+      sha256: "23f08335362185a5ea2ad3a4e597f1375e78bce8a040df5c600c8d3552ef2394"
       url: "https://pub.dev"
     source: hosted
-    version: "1.16.0"
+    version: "1.17.0"
+  package_info_plus:
+    dependency: transitive
+    description:
+      name: package_info_plus
+      sha256: f69da0d3189a4b4ceaeb1a3defb0f329b3b352517f52bed4290f83d4f06bc08d
+      url: "https://pub.dev"
+    source: hosted
+    version: "9.0.0"
+  package_info_plus_platform_interface:
+    dependency: transitive
+    description:
+      name: package_info_plus_platform_interface
+      sha256: "202a487f08836a592a6bd4f901ac69b3a8f146af552bbd14407b6b41e1c3f086"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.2.1"
   path:
     dependency: transitive
     description:
@@ -388,18 +444,18 @@ packages:
     dependency: transitive
     description:
       name: url_launcher_android
-      sha256: "81777b08c498a292d93ff2feead633174c386291e35612f8da438d6e92c4447e"
+      sha256: "767344bf3063897b5cf0db830e94f904528e6dd50a6dfaf839f0abf509009611"
       url: "https://pub.dev"
     source: hosted
-    version: "6.3.20"
+    version: "6.3.28"
   url_launcher_ios:
     dependency: transitive
     description:
       name: url_launcher_ios
-      sha256: d80b3f567a617cb923546034cc94bfe44eb15f989fe670b37f26abdb9d939cb7
+      sha256: cfde38aa257dae62ffe79c87fab20165dfdf6988c1d31b58ebf59b9106062aad
       url: "https://pub.dev"
     source: hosted
-    version: "6.3.4"
+    version: "6.3.6"
   url_launcher_linux:
     dependency: transitive
     description:
@@ -412,10 +468,10 @@ packages:
     dependency: transitive
     description:
       name: url_launcher_macos
-      sha256: c043a77d6600ac9c38300567f33ef12b0ef4f4783a2c1f00231d2b1941fea13f
+      sha256: "368adf46f71ad3c21b8f06614adb38346f193f3a59ba8fe9a2fd74133070ba18"
       url: "https://pub.dev"
     source: hosted
-    version: "3.2.3"
+    version: "3.2.5"
   url_launcher_platform_interface:
     dependency: transitive
     description:
@@ -428,10 +484,10 @@ packages:
     dependency: transitive
     description:
       name: url_launcher_web
-      sha256: "4bd2b7b4dc4d4d0b94e5babfffbca8eac1a126c7f3d6ecbc1a11013faa3abba2"
+      sha256: d0412fcf4c6b31ecfdb7762359b7206ffba3bbffd396c6d9f9c4616ece476c1f
       url: "https://pub.dev"
     source: hosted
-    version: "2.4.1"
+    version: "2.4.2"
   url_launcher_windows:
     dependency: transitive
     description:
@@ -452,10 +508,10 @@ packages:
     dependency: transitive
     description:
       name: vector_math
-      sha256: "80b3257d1492ce4d091729e3a67a60407d227c27241d6927be0130c98e741803"
+      sha256: d530bd74fea330e6e364cda7a85019c434070188383e1cd8d9777ee586914c5b
       url: "https://pub.dev"
     source: hosted
-    version: "2.1.4"
+    version: "2.2.0"
   web:
     dependency: transitive
     description:
@@ -464,6 +520,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.1"
+  win32:
+    dependency: transitive
+    description:
+      name: win32
+      sha256: d7cb55e04cd34096cd3a79b3330245f54cb96a370a1c27adb3c84b917de8b08e
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.15.0"
+  xdg_directories:
+    dependency: transitive
+    description:
+      name: xdg_directories
+      sha256: "7a3f37b05d989967cdddcbb571f1ea834867ae2faa29725fd085180e0883aa15"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.0"
   xml:
     dependency: transitive
     description:
@@ -481,5 +553,5 @@ packages:
     source: hosted
     version: "3.1.3"
 sdks:
-  dart: ">=3.8.0 <4.0.0"
-  flutter: ">=3.32.0"
+  dart: ">=3.10.0 <4.0.0"
+  flutter: ">=3.38.0"
