@@ -113,6 +113,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Set<Polyline> _routePolylines = {};
   List<Station> _routeStations = [];
   bool _hasRoute = false;
+  List<LatLng> _routePoints = [];
   double? _destinationLat;
   double? _destinationLng;
   bool _loadingStations = true;
@@ -224,6 +225,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   controller: _searchController,
                   focusNode: _searchFocusNode,
                   onChanged: _onSearchChanged,
+                  onSubmitted: _onSearchSubmitted,
+                  onClear: _clearRouteAndSearch,
+                  hasRoute: _hasRoute,
                   palette: _palette,
                 ),
                 if (_searchFocusNode.hasFocus &&
@@ -278,8 +282,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   FloatingActionButton.extended(
                     heroTag: 'fab-route',
                     onPressed: _onRoutePressed,
-                    icon: Icon(_hasRoute ? Icons.close : Icons.alt_route),
-                    label: Text(_hasRoute ? 'Quitar ruta' : 'Ruta'),
+                    icon: const Icon(Icons.alt_route),
+                    label: const Text('Ruta'),
                   ),
             ],
           ),
@@ -1086,6 +1090,48 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     });
   }
 
+  Future<void> _onSearchSubmitted(String value) async {
+    _debounce?.cancel();
+    final query = value.trim();
+    if (query.length < 3) return;
+    if (_predictions.isNotEmpty) {
+      await _onPredictionSelected(_predictions.first);
+      return;
+    }
+    setState(() => _loadingPredictions = true);
+    try {
+      final results = await _placesApi.autocomplete(
+        input: query,
+        sessionToken: _sessionToken,
+      );
+      if (!mounted) return;
+      if (results.isEmpty) {
+        setState(() {
+          _predictions = [];
+          _loadingPredictions = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No hay resultados.')),
+        );
+        return;
+      }
+      setState(() {
+        _predictions = results;
+        _loadingPredictions = false;
+      });
+      await _onPredictionSelected(results.first);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _predictions = [];
+        _loadingPredictions = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo buscar el destino.')),
+      );
+    }
+  }
+
   Future<void> _fetchPredictions(String input) async {
     final requestId = ++_autocompleteRequestId;
     setState(() => _loadingPredictions = true);
@@ -1129,9 +1175,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       _destinationLat = lat;
       _destinationLng = lng;
       await _drawRouteToDestination(lat, lng);
-      await _mapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(LatLng(lat, lng), 11),
-      );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1180,20 +1223,22 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
           ),
         };
         _hasRoute = polylinePoints.isNotEmpty;
+        _routePoints = polylinePoints;
       });
 
       if (polylinePoints.isNotEmpty) {
         await _applyRouteFilter(polylinePoints);
-        final bounds = _boundsFromLatLng(polylinePoints);
-        await _mapController?.animateCamera(
-          CameraUpdate.newLatLngBounds(bounds, 48),
-        );
+        await _fitRouteBounds(polylinePoints);
       } else {
         setState(() {
           _routeStations = [];
           _hasRoute = false;
+          _routePoints = [];
         });
         _rebuildMarkersForSelection();
+        await _mapController?.animateCamera(
+          CameraUpdate.newLatLngZoom(LatLng(destLat, destLng), 11),
+        );
       }
     } catch (_) {
       if (!mounted) return;
@@ -1305,8 +1350,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _onRoutePressed() async {
-    if (_hasRoute) {
-      await _clearRoute();
+    if (_hasRoute && _routePoints.isNotEmpty) {
+      await _fitRouteBounds(_routePoints);
       return;
     }
     final lat = _destinationLat;
@@ -1324,9 +1369,30 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     setState(() {
       _routePolylines = {};
       _routeStations = [];
+      _routePoints = [];
       _hasRoute = false;
     });
     await _rebuildMarkersForSelection();
+  }
+
+  Future<void> _clearRouteAndSearch() async {
+    FocusScope.of(context).unfocus();
+    _searchController.clear();
+    _sessionToken = _uuid.v4();
+    setState(() {
+      _predictions = [];
+      _destinationLat = null;
+      _destinationLng = null;
+    });
+    await _clearRoute();
+  }
+
+  Future<void> _fitRouteBounds(List<LatLng> points) async {
+    if (points.isEmpty) return;
+    final bounds = _boundsFromLatLng(points);
+    await _mapController?.animateCamera(
+      CameraUpdate.newLatLngBounds(bounds, 48),
+    );
   }
 }
 
@@ -1335,12 +1401,18 @@ class _SearchBar extends StatelessWidget {
     required this.controller,
     required this.focusNode,
     required this.onChanged,
+    required this.onSubmitted,
+    required this.onClear,
+    required this.hasRoute,
     required this.palette,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
   final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSubmitted;
+  final VoidCallback onClear;
+  final bool hasRoute;
   final _MapUiPalette palette;
 
   @override
@@ -1357,20 +1429,35 @@ class _SearchBar extends StatelessWidget {
           ),
         ],
       ),
-      child: TextField(
-        controller: controller,
-        focusNode: focusNode,
-        onChanged: onChanged,
-        style: TextStyle(color: palette.textPrimary),
-        cursorColor: palette.accent,
-        decoration: InputDecoration(
-          prefixIcon: Icon(Icons.search, color: palette.textSecondary),
-          hintText: 'Ir a',
-          hintStyle: TextStyle(color: palette.textSecondary),
-          border: InputBorder.none,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        ),
+      child: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: controller,
+        builder: (context, value, _) {
+          final showClear = value.text.isNotEmpty || hasRoute;
+          return TextField(
+            controller: controller,
+            focusNode: focusNode,
+            onChanged: onChanged,
+            onSubmitted: onSubmitted,
+            style: TextStyle(color: palette.textPrimary),
+            cursorColor: palette.accent,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              prefixIcon: Icon(Icons.search, color: palette.textSecondary),
+              suffixIcon: showClear
+                  ? IconButton(
+                      icon: Icon(Icons.close, color: palette.textSecondary),
+                      tooltip: 'Limpiar',
+                      onPressed: onClear,
+                    )
+                  : null,
+              hintText: 'Ir a',
+              hintStyle: TextStyle(color: palette.textSecondary),
+              border: InputBorder.none,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            ),
+          );
+        },
       ),
     );
   }
