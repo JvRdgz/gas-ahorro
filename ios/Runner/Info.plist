@@ -30,8 +30,14 @@
 		</array>
 		<key>GMSApiKey</key>
 		<string>$(GOOGLE_MAPS_API_KEY_IOS)</string>
+		<key>NSBonjourServices</key>
+		<array>
+			<string>_http._tcp</string>
+		</array>
 		<key>NSLocationWhenInUseUsageDescription</key>
 		<string>Necesitamos tu ubicación para ajustar el modo noche del mapa según el anochecer.</string>
+		<key>NSLocalNetworkUsageDescription</key>
+		<string>Necesitamos acceso a la red local para descubrir servicios en la red.</string>
 		<key>LSRequiresIPhoneOS</key>
 		<true/>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
