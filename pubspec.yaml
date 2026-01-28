@@ -12,6 +12,7 @@ dependencies:
   google_maps_flutter: ^2.6.1
   geolocator: ^14.0.2
   http: ^1.2.2
+  shared_preferences: ^2.3.2
   url_launcher: ^6.3.0
   uuid: ^4.4.0
 
