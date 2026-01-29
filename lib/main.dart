@@ -158,7 +158,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       title: 'Filtra combustible',
       description:
           'Selecciona el tipo de combustible y activa “Solo más baratas” si '
-          'quieres ver únicamente las mejores opciones.',
+          'quieres ver únicamente los mejores opciones.',
       targetKey: _filterKey,
     ),
     _TutorialStep(
@@ -452,7 +452,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       if (_selectedFuel != null) {
         await _rebuildMarkersForSelection();
       } else {
-        await _setMarkersForStations(stations);
+        final visibleStations = _includeRestricted
+            ? stations
+            : stations.where((station) => !station.isRestricted).toList();
+        await _setMarkersForStations(visibleStations);
       }
       if (!mounted) return;
       setState(() {
@@ -580,6 +583,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                         side: BorderSide(color: palette.border),
                         onSelected: (_) => setModalState(() {
                           tempSelection = null;
+                          tempIncludeRestricted = false;
+                          tempCheapestOnly = false;
                         }),
                       ),
                       ..._fuelOptions.map((option) {
