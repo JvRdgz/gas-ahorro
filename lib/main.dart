@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import 'models/place_prediction.dart';
@@ -19,7 +21,11 @@ import 'utils/price_color.dart';
 import 'widgets/price_legend.dart';
 import 'widgets/station_sheet.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (defaultTargetPlatform == TargetPlatform.iOS) {
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+  }
   runApp(const GasAhorroApp());
 }
 
@@ -94,6 +100,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   final _sunTimesApi = SunTimesApi();
   final _directionsApi = DirectionsApi();
   final _uuid = const Uuid();
+  final _mapKey = GlobalKey();
+  final _searchKey = GlobalKey();
+  final _filterKey = GlobalKey();
+  final _routeKey = GlobalKey();
 
   GoogleMapController? _mapController;
   List<Station> _markerStationsSource = const [];
@@ -119,6 +129,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   bool _loadingStations = true;
   bool _isApplyingFilter = false;
   bool _filterCheapestOnly = false;
+  bool _includeRestricted = false;
+  int? _routeRadiusMeters;
   String? _stationsError;
   String? _stationsErrorDetails;
   List<Station> _stations = [];
@@ -127,7 +139,69 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   double? _maxPrice;
   Set<Marker> _stationMarkers = const {};
   FuelOptionId? _selectedFuel;
-  final Map<double, BitmapDescriptor> _iconCache = {};
+  final Map<int, BitmapDescriptor> _iconCache = {};
+  final Map<int, Future<BitmapDescriptor>> _iconLoaders = {};
+  final Map<String, BitmapDescriptor> _priceIconCache = {};
+  final Map<String, Future<BitmapDescriptor>> _priceIconLoaders = {};
+  static const Color _restrictedMarkerColor = Color(0xFF5D6A70);
+  static const int _routeRadiusAutoSentinel = -1;
+  bool _showTutorial = false;
+  int _tutorialStepIndex = 0;
+  late final List<_TutorialStep> _tutorialSteps = [
+    _TutorialStep(
+      title: 'Busca tu destino',
+      description:
+          'Escribe un lugar y elige una sugerencia para trazar la ruta.',
+      targetKey: _searchKey,
+    ),
+    _TutorialStep(
+      title: 'Ver la ruta',
+      description:
+          'La ruta se mostrará en el mapa con las gasolineras que estén de camino.',
+      targetKey: _routeKey,
+    ),
+    _TutorialStep(
+      title: 'Filtra combustible',
+      description:
+          'Selecciona el tipo de combustible y activa “Solo más baratas” si '
+          'quieres ver únicamente los mejores opciones.',
+      targetKey: _filterKey,
+    ),
+    _TutorialStep(
+      title: 'Venta restringida',
+      description:
+          'Puedes incluir estaciones con venta restringida (solo flotas o '
+          'clientes autorizados) desde el filtro.',
+      targetKey: _filterKey,
+    ),
+    _TutorialStep(
+      title: 'Radio en ruta',
+      description:
+          'Cuando tengas una ruta, puedes ajustar el radio de muestra en ruta (500 m a 10 km) o '
+          'dejarlo en automatico desde el filtro.',
+      targetKey: _filterKey,
+    ),
+    _TutorialStep(
+      title: 'Toca una gasolinera',
+      description:
+          'Pulsa un surtidor para ver los detalles y precios disponibles.',
+      targetKey: _mapKey,
+    ),
+    _TutorialStep(
+      title: 'Precio en el mapa',
+      description:
+          'El precio del combustible seleccionado aparece junto al icono '
+          'para comparar de un vistazo.',
+      targetKey: _mapKey,
+    ),
+    _TutorialStep(
+      title: 'Navegar con “Ir”',
+      description:
+          'Al abrir una gasolinera, el botón “Ir” abre tu app de navegación '
+          'por defecto y crea la ruta con esa parada.',
+      targetKey: _mapKey,
+    ),
+  ];
 
   @override
   void initState() {
@@ -136,7 +210,31 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _loadStations();
     _sessionToken = _uuid.v4();
     _loadMapStyle();
+    _loadRouteRadiusPreference();
     _initLocationAndNightMode();
+    _maybeShowTutorial();
+  }
+
+  Future<void> _maybeShowTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final seen = prefs.getBool('onboarding_seen') ?? false;
+    if (seen || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _showTutorial = true;
+        _tutorialStepIndex = 0;
+      });
+    });
+  }
+
+  Future<void> _loadRouteRadiusPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getInt('route_radius_meters');
+    if (!mounted || stored == null) return;
+    setState(() {
+      _routeRadiusMeters = stored <= 0 ? null : stored;
+    });
   }
 
   @override
@@ -186,27 +284,30 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
     return Stack(
       children: [
-        GoogleMap(
-          initialCameraPosition: CameraPosition(
-            target: LatLng(_stations.first.lat, _stations.first.lng),
-            zoom: 6,
+        KeyedSubtree(
+          key: _mapKey,
+          child: GoogleMap(
+            initialCameraPosition: CameraPosition(
+              target: LatLng(_stations.first.lat, _stations.first.lng),
+              zoom: 6,
+            ),
+            padding: EdgeInsets.only(
+              top: viewPadding.top,
+              bottom: viewPadding.bottom + 12,
+            ),
+            onMapCreated: (controller) {
+              _mapController = controller;
+              _applyMapStyle();
+              if (_markerStationsSource.isNotEmpty) {
+                _refreshVisibleMarkers();
+              }
+            },
+            onCameraIdle: _onCameraIdle,
+            myLocationEnabled: true,
+            myLocationButtonEnabled: false,
+            markers: _stationMarkers,
+            polylines: _routePolylines,
           ),
-          padding: EdgeInsets.only(
-            top: viewPadding.top,
-            bottom: viewPadding.bottom + 12,
-          ),
-          onMapCreated: (controller) {
-            _mapController = controller;
-            _applyMapStyle();
-            if (_markerStationsSource.isNotEmpty) {
-              _refreshVisibleMarkers();
-            }
-          },
-          onCameraIdle: _onCameraIdle,
-          myLocationEnabled: true,
-          myLocationButtonEnabled: false,
-          markers: _stationMarkers,
-          polylines: _routePolylines,
         ),
         SafeArea(
           child: Padding(
@@ -222,6 +323,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 8),
                 _SearchBar(
+                  key: _searchKey,
                   controller: _searchController,
                   focusNode: _searchFocusNode,
                   onChanged: _onSearchChanged,
@@ -241,8 +343,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   ),
                 const SizedBox(height: 10),
                 _FilterButton(
+                  key: _filterKey,
                   label: _filterLabel(),
                   onPressed: _openFuelFilter,
+                  icon: Icons.tune,
                   palette: _palette,
                 ),
               ],
@@ -279,12 +383,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 child: const Icon(Icons.my_location),
               ),
               const SizedBox(height: 12),
-                  FloatingActionButton.extended(
-                    heroTag: 'fab-route',
-                    onPressed: _onRoutePressed,
-                    icon: const Icon(Icons.alt_route),
-                    label: const Text('Ruta'),
-                  ),
+              FloatingActionButton.extended(
+                heroTag: 'fab-route',
+                onPressed: _onRoutePressed,
+                key: _routeKey,
+                icon: const Icon(Icons.alt_route),
+                label: const Text('Ruta'),
+              ),
             ],
           ),
         ),
@@ -295,8 +400,47 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               child: const Center(child: CircularProgressIndicator()),
             ),
           ),
+        if (_showTutorial)
+          _TutorialOverlay(
+            step: _tutorialSteps[_tutorialStepIndex],
+            stepIndex: _tutorialStepIndex,
+            totalSteps: _tutorialSteps.length,
+            targetRect:
+                _rectForKey(_tutorialSteps[_tutorialStepIndex].targetKey),
+            onSkip: _endTutorial,
+            onNext: _nextTutorialStep,
+          ),
       ],
     );
+  }
+
+  Rect? _rectForKey(GlobalKey key) {
+    final context = key.currentContext;
+    if (context == null) return null;
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) return null;
+    final offset = renderObject.localToGlobal(Offset.zero);
+    return offset & renderObject.size;
+  }
+
+  Future<void> _endTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('onboarding_seen', true);
+    if (!mounted) return;
+    setState(() {
+      _showTutorial = false;
+    });
+  }
+
+  void _nextTutorialStep() {
+    final isLast = _tutorialStepIndex >= _tutorialSteps.length - 1;
+    if (isLast) {
+      _endTutorial();
+      return;
+    }
+    setState(() {
+      _tutorialStepIndex += 1;
+    });
   }
 
   Future<void> _loadStations() async {
@@ -332,7 +476,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       if (_selectedFuel != null) {
         await _rebuildMarkersForSelection();
       } else {
-        await _setMarkersForStations(stations);
+        final visibleStations = _includeRestricted
+            ? stations
+            : stations.where((station) => !station.isRestricted).toList();
+        await _setMarkersForStations(visibleStations);
       }
       if (!mounted) return;
       setState(() {
@@ -348,30 +495,53 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     }
   }
 
-  Set<Marker> _buildUnselectedMarkers(List<Station> stations) {
+  Future<Set<Marker>> _buildUnselectedMarkers(
+    List<Station> stations,
+  ) async {
+    final normalIcon = await _iconForColor(_colorForHue(_unselectedHue));
+    final restrictedIcon = await _iconForColor(_restrictedMarkerColor);
     return stations.map((station) {
       return Marker(
         markerId: MarkerId(station.id),
         position: LatLng(station.lat, station.lng),
-        icon: _iconForHue(_unselectedHue),
+        icon: station.isRestricted ? restrictedIcon : normalIcon,
         onTap: () => _showStationSheet(station),
       );
     }).toSet();
   }
 
-  Set<Marker> _buildMarkersForSelection(
+  Future<Set<Marker>> _buildMarkersForSelection(
     List<Station> stations,
     double minPrice,
     double maxPrice,
-  ) {
-    return stations.map((station) {
+  ) async {
+    final iconKeys = <_PriceIconKey>{};
+    final stationIcons = <String, _PriceIconKey>{};
+    for (final station in stations) {
       final price = _priceForSelectedFuel(station);
-      if (price == null) return null;
-      final hue = PriceColor.hueFor(price, minPrice, maxPrice);
+      if (price == null) continue;
+      final hue = _bucketHue(PriceColor.hueFor(price, minPrice, maxPrice));
+      final color =
+          station.isRestricted ? _restrictedMarkerColor : _colorForHue(hue);
+      final label = _formatPrice(price);
+      final key = _PriceIconKey(color.value, label);
+      iconKeys.add(key);
+      stationIcons[station.id] = key;
+    }
+    await Future.wait(
+      iconKeys.map(
+        (key) => _iconForColorWithPrice(Color(key.colorValue), key.label),
+      ),
+    );
+    return stations.map((station) {
+      final key = stationIcons[station.id];
+      if (key == null) return null;
+      final icon = _priceIconCache[_priceCacheKey(key.colorValue, key.label)];
+      if (icon == null) return null;
       return Marker(
         markerId: MarkerId(station.id),
         position: LatLng(station.lat, station.lng),
-        icon: _iconForHue(hue),
+        icon: icon,
         onTap: () => _showStationSheet(station),
       );
     }).whereType<Marker>().toSet();
@@ -394,6 +564,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       builder: (context) {
         FuelOptionId? tempSelection = _selectedFuel;
         bool tempCheapestOnly = _filterCheapestOnly;
+        bool tempIncludeRestricted = _includeRestricted;
+        bool tempRouteAuto = _routeRadiusMeters == null;
+        double tempRouteMeters = (_routeRadiusMeters ?? 2000).toDouble();
+        int? tempRouteRadiusMeters = _routeRadiusMeters;
         return StatefulBuilder(
           builder: (context, setModalState) {
             final media = MediaQuery.of(context);
@@ -436,6 +610,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                         side: BorderSide(color: palette.border),
                         onSelected: (_) => setModalState(() {
                           tempSelection = null;
+                          tempIncludeRestricted = false;
+                          tempCheapestOnly = false;
                         }),
                       ),
                       ..._fuelOptions.map((option) {
@@ -476,6 +652,83 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                       tempCheapestOnly = value;
                     }),
                   ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      'Incluir venta restringida',
+                      style: TextStyle(color: palette.textPrimary),
+                    ),
+                    subtitle: Text(
+                      'Solo para flotas o clientes autorizados.',
+                      style: TextStyle(color: palette.textSecondary),
+                    ),
+                    value: tempIncludeRestricted,
+                    activeColor: palette.accent,
+                    onChanged: (value) => setModalState(() {
+                      tempIncludeRestricted = value;
+                    }),
+                  ),
+                  if (_hasRoute)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 8),
+                        Text(
+                          'Radio en ruta',
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    color: palette.textPrimary,
+                                  ),
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            'Automatico',
+                            style: TextStyle(color: palette.textPrimary),
+                          ),
+                          subtitle: Text(
+                            'Ajusta el radio segun la longitud de la ruta.',
+                            style: TextStyle(color: palette.textSecondary),
+                          ),
+                          value: tempRouteAuto,
+                          activeColor: palette.accent,
+                          onChanged: (value) => setModalState(() {
+                            tempRouteAuto = value;
+                            if (tempRouteAuto) {
+                              tempRouteRadiusMeters = null;
+                            } else {
+                              tempRouteMeters =
+                                  tempRouteMeters.clamp(500, 10000);
+                              tempRouteRadiusMeters =
+                                  tempRouteMeters.round();
+                            }
+                          }),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Radio: ${_formatRouteRadius(tempRouteMeters.round())}',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: palette.textPrimary,
+                              ),
+                        ),
+                        Slider(
+                          value: tempRouteMeters.clamp(500, 10000),
+                          min: 500,
+                          max: 10000,
+                          divisions: 95,
+                          label: _formatRouteRadius(tempRouteMeters.round()),
+                          onChanged: tempRouteAuto
+                              ? null
+                              : (value) => setModalState(() {
+                                    tempRouteMeters =
+                                        (value / 100).round() * 100.0;
+                                    tempRouteRadiusMeters =
+                                        tempRouteMeters.round();
+                                  }),
+                        ),
+                      ],
+                    ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -496,14 +749,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                             _FilterResult(
                               fuel: tempSelection,
                               cheapestOnly: tempCheapestOnly,
+                              includeRestricted: tempIncludeRestricted,
+                              routeRadiusMeters: tempRouteRadiusMeters,
                             ),
                           ),
                           child: const Text('Aplicar'),
                           style: FilledButton.styleFrom(
                             backgroundColor: palette.accent,
-                            foregroundColor: palette.isDark
-                                ? Colors.black87
-                                : Colors.white,
+                            foregroundColor:
+                                palette.isDark ? Colors.black87 : Colors.white,
                           ),
                         ),
                       ),
@@ -518,23 +772,52 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     );
 
     if (result == null) return;
-    await _applyFilter(result.fuel, result.cheapestOnly);
+    await _applyFilter(
+      result.fuel,
+      result.cheapestOnly,
+      result.includeRestricted,
+      result.routeRadiusMeters,
+    );
   }
 
   Future<void> _applyFilter(
     FuelOptionId? selection,
     bool cheapestOnly,
+    bool includeRestricted,
+    int? routeRadiusMeters,
   ) async {
+    final previousRouteRadius = _routeRadiusMeters;
     setState(() {
       _selectedFuel = selection;
       _filterCheapestOnly = cheapestOnly;
+      _includeRestricted = includeRestricted;
+      _routeRadiusMeters = routeRadiusMeters;
     });
+    final routeRadiusChanged = previousRouteRadius != _routeRadiusMeters;
+    if (routeRadiusChanged) {
+      await _persistRouteRadiusPreference(_routeRadiusMeters);
+    }
+    if (_hasRoute && _routePoints.isNotEmpty && routeRadiusChanged) {
+      await _applyRouteFilter(_routePoints);
+      return;
+    }
     await _runWithFilterLoading(_rebuildMarkersForSelection);
+  }
+
+  Future<void> _persistRouteRadiusPreference(int? meters) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(
+      'route_radius_meters',
+      meters ?? _routeRadiusAutoSentinel,
+    );
   }
 
   Future<void> _rebuildMarkersForSelection() async {
     if (_stations.isEmpty) return;
     final baseStations = _hasRoute ? _routeStations : _stations;
+    final visibleStations = _includeRestricted
+        ? baseStations
+        : baseStations.where((station) => !station.isRestricted).toList();
     if (baseStations.isEmpty) {
       setState(() {
         _stationMarkers = const {};
@@ -549,18 +832,32 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       return;
     }
 
+    if (visibleStations.isEmpty) {
+      setState(() {
+        _stationMarkers = const {};
+        _minPrice = null;
+        _maxPrice = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay estaciones publicas con el filtro actual.'),
+        ),
+      );
+      return;
+    }
+
     if (_selectedFuel == null) {
       setState(() {
         _minPrice = null;
         _maxPrice = null;
       });
-      await _setMarkersForStations(baseStations);
+      await _setMarkersForStations(visibleStations);
       return;
     }
 
     final entries = <Map<String, dynamic>>[];
-    for (var i = 0; i < baseStations.length; i++) {
-      final station = baseStations[i];
+    for (var i = 0; i < visibleStations.length; i++) {
+      final station = visibleStations[i];
       final price = _priceForSelectedFuel(station);
       if (price == null) continue;
       entries.add({
@@ -600,7 +897,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     }
     final minPrice = (result['minPrice'] as num).toDouble();
     final maxPrice = (result['maxPrice'] as num).toDouble();
-    final stationsToUse = indices.map((i) => baseStations[i]).toList();
+    final stationsToUse = indices.map((i) => visibleStations[i]).toList();
     await _setMarkersForStations(
       stationsToUse,
       minPrice: minPrice,
@@ -687,8 +984,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     final minPrice = _markerMinPrice;
     final maxPrice = _markerMaxPrice;
     final markers = (minPrice != null && maxPrice != null)
-        ? _buildMarkersForSelection(stationsToRender, minPrice, maxPrice)
-        : _buildUnselectedMarkers(stationsToRender);
+        ? await _buildMarkersForSelection(stationsToRender, minPrice, maxPrice)
+        : await _buildUnselectedMarkers(stationsToRender);
     await _setMarkersInBatches(markers);
   }
 
@@ -733,8 +1030,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       return stations;
     }
 
-    final midLat =
-        (bounds.northeast.latitude + bounds.southwest.latitude) / 2;
+    final midLat = (bounds.northeast.latitude + bounds.southwest.latitude) / 2;
     final metersPerDegreeLat = 111320.0;
     final metersPerDegreeLng =
         math.max(1e-6, 111320.0 * math.cos(midLat * math.pi / 180));
@@ -803,33 +1099,194 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     });
   }
 
-  BitmapDescriptor _iconForHue(double hue) {
-    final bucketed = (hue / 5).round() * 5.0;
-    return _iconCache.putIfAbsent(
-      bucketed,
-      () => BitmapDescriptor.defaultMarkerWithHue(bucketed),
+  double _bucketHue(double hue) {
+    return (hue / 10).round() * 10.0;
+  }
+
+  String _formatPrice(double price) {
+    return '${price.toStringAsFixed(3).replaceAll('.', ',')} €';
+  }
+
+  String _priceCacheKey(int colorValue, String label) {
+    return '$colorValue|$label';
+  }
+
+  Future<BitmapDescriptor> _iconForColor(Color color) async {
+    final key = color.value;
+    final cached = _iconCache[key];
+    if (cached != null) return cached;
+    final pending = _iconLoaders[key];
+    if (pending != null) return pending;
+    final future = _buildGasMarkerIcon(color);
+    _iconLoaders[key] = future;
+    final icon = await future;
+    _iconCache[key] = icon;
+    _iconLoaders.remove(key);
+    return icon;
+  }
+
+  Future<BitmapDescriptor> _iconForColorWithPrice(
+    Color color,
+    String label,
+  ) async {
+    final key = _priceCacheKey(color.value, label);
+    final cached = _priceIconCache[key];
+    if (cached != null) return cached;
+    final pending = _priceIconLoaders[key];
+    if (pending != null) return pending;
+    final future = _buildGasMarkerIconWithPrice(
+      color,
+      label,
     );
+    _priceIconLoaders[key] = future;
+    final icon = await future;
+    _priceIconCache[key] = icon;
+    _priceIconLoaders.remove(key);
+    return icon;
+  }
+
+  Color _colorForHue(double hue) {
+    return HSVColor.fromAHSV(1, hue, 0.85, 0.9).toColor();
+  }
+
+  Future<BitmapDescriptor> _buildGasMarkerIcon(Color color) async {
+    const circleSize = 84.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final center = const Offset(circleSize / 2, circleSize / 2);
+    final radius = circleSize / 2;
+
+    final paint = Paint()..color = color;
+    canvas.drawCircle(center, radius, paint);
+
+    const icon = Icons.local_gas_station;
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: String.fromCharCode(icon.codePoint),
+        style: TextStyle(
+          fontSize: 42,
+          fontFamily: icon.fontFamily,
+          package: icon.fontPackage,
+          color: Colors.white,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final offset = Offset(
+      center.dx - textPainter.width / 2,
+      center.dy - textPainter.height / 2,
+    );
+    textPainter.paint(canvas, offset);
+
+    final image = await recorder
+        .endRecording()
+        .toImage(circleSize.toInt(), circleSize.toInt());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
+  }
+
+  Future<BitmapDescriptor> _buildGasMarkerIconWithPrice(
+    Color color,
+    String label,
+  ) async {
+    const circleSize = 88.0;
+    const pillHeight = 52.0;
+    const pillRadius = 22.0;
+    const textSize = 34.0;
+    const pillPadding = 20.0;
+    const gap = 14.0;
+
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: const TextStyle(
+          fontSize: textSize,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF163027),
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    final pillWidth = textPainter.width + pillPadding * 2;
+    final width = circleSize + gap + pillWidth;
+    final height = circleSize;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final center = const Offset(circleSize / 2, circleSize / 2);
+    final radius = circleSize / 2;
+
+    final paint = Paint()..color = color;
+    canvas.drawCircle(center, radius, paint);
+
+    const icon = Icons.local_gas_station;
+    final iconPainter = TextPainter(
+      text: TextSpan(
+        text: String.fromCharCode(icon.codePoint),
+        style: TextStyle(
+          fontSize: 52,
+          fontFamily: icon.fontFamily,
+          package: icon.fontPackage,
+          color: Colors.white,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final iconOffset = Offset(
+      center.dx - iconPainter.width / 2,
+      center.dy - iconPainter.height / 2,
+    );
+    iconPainter.paint(canvas, iconOffset);
+
+    final pillLeft = circleSize - 6;
+    final pillTop = (height - pillHeight) / 2;
+    final pillRect = Rect.fromLTWH(pillLeft, pillTop, pillWidth, pillHeight);
+    final pillPaint = Paint()..color = const Color(0xFFF6FBF8);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(pillRect, const Radius.circular(pillRadius)),
+      pillPaint,
+    );
+    final textOffset = Offset(
+      pillLeft + pillPadding,
+      pillTop + (pillHeight - textPainter.height) / 2,
+    );
+    textPainter.paint(canvas, textOffset);
+
+    final image =
+        await recorder.endRecording().toImage(width.toInt(), height.toInt());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
   }
 
   String _fuelLabelFor(FuelOptionId? selection) {
     if (selection == null) return '';
-    return _fuelOptions
-        .firstWhere((option) => option.id == selection)
-        .label;
+    return _fuelOptions.firstWhere((option) => option.id == selection).label;
   }
 
   String _filterLabel() {
     final selection = _selectedFuel;
-    final base = selection == null
-        ? 'Selecciona combustible'
-        : _fuelLabelFor(selection);
+    var base =
+        selection == null ? 'Selecciona combustible' : _fuelLabelFor(selection);
     if (_filterCheapestOnly && selection != null) {
-      return '$base · mas baratas';
+      base = '$base · mas baratas';
+    }
+    if (_includeRestricted) {
+      base = '$base · incluye restringidas';
+    }
+    if (_hasRoute) {
+      final radius = _routeRadiusMeters;
+      final radiusLabel =
+          radius == null ? 'radio auto' : 'radio ${_formatRouteRadius(radius)}';
+      base = '$base · $radiusLabel';
     }
     return base;
   }
 
   Color _markerColorForStation(Station station) {
+    if (station.isRestricted) {
+      return _restrictedMarkerColor;
+    }
     if (_selectedFuel != null && _minPrice != null && _maxPrice != null) {
       final price = _priceForSelectedFuel(station);
       if (price != null) {
@@ -869,11 +1326,24 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   double _routeThresholdMeters(List<LatLng> points) {
+    final fixedRadius = _routeRadiusMeters;
+    if (fixedRadius != null) return fixedRadius.toDouble();
     if (points.length < 2) return 2000;
     final length = _estimateRouteLengthMeters(points);
-    if (length > 250000) return 5000;
-    if (length > 100000) return 3500;
-    return 2500;
+    if (length > 100000) return 2000;
+    if (length > 50000) return 1800;
+    return 1500;
+  }
+
+  String _formatRouteRadius(int meters) {
+    if (meters < 1000) {
+      return '$meters m';
+    }
+    if (meters % 1000 == 0) {
+      return '${meters ~/ 1000} km';
+    }
+    final km = meters / 1000;
+    return '${km.toStringAsFixed(1)} km';
   }
 
   double _estimateRouteLengthMeters(List<LatLng> points) {
@@ -1210,9 +1680,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       );
       if (!mounted) return;
 
-      final polylinePoints = points
-          .map((point) => LatLng(point['lat']!, point['lng']!))
-          .toList();
+      final polylinePoints =
+          points.map((point) => LatLng(point['lat']!, point['lng']!)).toList();
       setState(() {
         _routePolylines = {
           Polyline(
@@ -1251,10 +1720,26 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   LatLngBounds _boundsFromLatLng(List<LatLng> points) {
     double? minLat, maxLat, minLng, maxLng;
     for (final point in points) {
-      minLat = minLat == null ? point.latitude : minLat < point.latitude ? minLat : point.latitude;
-      maxLat = maxLat == null ? point.latitude : maxLat > point.latitude ? maxLat : point.latitude;
-      minLng = minLng == null ? point.longitude : minLng < point.longitude ? minLng : point.longitude;
-      maxLng = maxLng == null ? point.longitude : maxLng > point.longitude ? maxLng : point.longitude;
+      minLat = minLat == null
+          ? point.latitude
+          : minLat < point.latitude
+              ? minLat
+              : point.latitude;
+      maxLat = maxLat == null
+          ? point.latitude
+          : maxLat > point.latitude
+              ? maxLat
+              : point.latitude;
+      minLng = minLng == null
+          ? point.longitude
+          : minLng < point.longitude
+              ? minLng
+              : point.longitude;
+      maxLng = maxLng == null
+          ? point.longitude
+          : maxLng > point.longitude
+              ? maxLng
+              : point.longitude;
     }
     return LatLngBounds(
       southwest: LatLng(minLat ?? 0, minLng ?? 0),
@@ -1398,6 +1883,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
 class _SearchBar extends StatelessWidget {
   const _SearchBar({
+    super.key,
     required this.controller,
     required this.focusNode,
     required this.onChanged,
@@ -1526,6 +2012,188 @@ class _PredictionsList extends StatelessWidget {
   }
 }
 
+class _TutorialOverlay extends StatelessWidget {
+  const _TutorialOverlay({
+    required this.step,
+    required this.stepIndex,
+    required this.totalSteps,
+    required this.targetRect,
+    required this.onSkip,
+    required this.onNext,
+  });
+
+  final _TutorialStep step;
+  final int stepIndex;
+  final int totalSteps;
+  final Rect? targetRect;
+  final VoidCallback onSkip;
+  final VoidCallback onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final safe = media.padding;
+    final screenHeight = media.size.height;
+    final hasTarget = targetRect != null;
+    final hole =
+        (targetRect ?? Rect.fromLTWH(0, screenHeight * 0.5, 0, 0)).inflate(12);
+    final preferBelow = !hasTarget || hole.center.dy < screenHeight * 0.6;
+    final maxCardHeight = 210.0;
+    final minTop = safe.top + 16;
+    final maxTop = screenHeight - safe.bottom - maxCardHeight - 16;
+    final minBottom = safe.bottom + 16;
+    final maxBottom = screenHeight - safe.top - maxCardHeight - 16;
+    double? top;
+    double? bottom;
+    if (preferBelow) {
+      final proposed = (hasTarget ? hole.bottom : screenHeight * 0.28) + 16;
+      top = math.min(maxTop, math.max(minTop, proposed));
+    } else {
+      final proposed =
+          (screenHeight - (hasTarget ? hole.top : screenHeight * 0.5)) + 16;
+      bottom = math.min(maxBottom, math.max(minBottom, proposed));
+    }
+
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {},
+            child: CustomPaint(
+              painter: _TutorialPainter(
+                holeRect: hole,
+                overlayColor: Colors.black.withValues(alpha: 0.55),
+              ),
+            ),
+          ),
+          Positioned(
+            top: safe.top + 4,
+            right: 16,
+            child: TextButton(
+              onPressed: onSkip,
+              child: const Text('Saltar'),
+            ),
+          ),
+          Positioned(
+            left: 16,
+            right: 16,
+            top: top,
+            bottom: bottom,
+            child: Material(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              elevation: 8,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      step.title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      step.description,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Text(
+                          '${stepIndex + 1} / $totalSteps',
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelMedium
+                              ?.copyWith(color: Colors.grey[600]),
+                        ),
+                        const Spacer(),
+                        ElevatedButton(
+                          onPressed: onNext,
+                          child: Text(
+                            stepIndex == totalSteps - 1
+                                ? 'Empezar'
+                                : 'Siguiente',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TutorialPainter extends CustomPainter {
+  _TutorialPainter({
+    required this.holeRect,
+    required this.overlayColor,
+  });
+
+  final Rect? holeRect;
+  final Color overlayColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    canvas.saveLayer(rect, Paint());
+    canvas.drawRect(rect, Paint()..color = overlayColor);
+    if (holeRect != null) {
+      final clearPaint = Paint()..blendMode = BlendMode.clear;
+      final rrect = RRect.fromRectAndRadius(
+        holeRect!,
+        const Radius.circular(16),
+      );
+      canvas.drawRRect(rrect, clearPaint);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _TutorialPainter oldDelegate) {
+    return oldDelegate.holeRect != holeRect ||
+        oldDelegate.overlayColor != overlayColor;
+  }
+}
+
+class _TutorialStep {
+  const _TutorialStep({
+    required this.title,
+    required this.description,
+    required this.targetKey,
+  });
+
+  final String title;
+  final String description;
+  final GlobalKey targetKey;
+}
+
+class _PriceIconKey {
+  const _PriceIconKey(this.colorValue, this.label);
+
+  final int colorValue;
+  final String label;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _PriceIconKey &&
+        other.colorValue == colorValue &&
+        other.label == label;
+  }
+
+  @override
+  int get hashCode => Object.hash(colorValue, label);
+}
+
 class _ErrorState extends StatelessWidget {
   const _ErrorState({
     required this.message,
@@ -1594,28 +2262,35 @@ class _FilterResult {
   const _FilterResult({
     required this.fuel,
     required this.cheapestOnly,
+    required this.includeRestricted,
+    required this.routeRadiusMeters,
   });
 
   final FuelOptionId? fuel;
   final bool cheapestOnly;
+  final bool includeRestricted;
+  final int? routeRadiusMeters;
 }
 
 class _FilterButton extends StatelessWidget {
   const _FilterButton({
+    super.key,
     required this.label,
     required this.onPressed,
+    required this.icon,
     required this.palette,
   });
 
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
+  final IconData icon;
   final _MapUiPalette palette;
 
   @override
   Widget build(BuildContext context) {
     return OutlinedButton.icon(
       onPressed: onPressed,
-      icon: const Icon(Icons.local_gas_station),
+      icon: Icon(icon),
       label: Text(label),
       style: OutlinedButton.styleFrom(
         backgroundColor: palette.surface,

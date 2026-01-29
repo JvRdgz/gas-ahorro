@@ -23,6 +23,8 @@ class FuelApi {
       final lat = _parseDouble(raw['Latitud']);
       final lng = _parseDouble(raw['Longitud (WGS84)']);
       final prices = _extractPrices(raw);
+      final saleType = raw['Tipo Venta']?.toString().trim().toUpperCase();
+      final isRestricted = saleType == 'R';
 
       return Station(
         id: raw['IDEESS']?.toString() ?? '',
@@ -32,6 +34,7 @@ class FuelApi {
         lat: lat ?? 0,
         lng: lng ?? 0,
         prices: prices,
+        isRestricted: isRestricted,
       );
     }).where((station) => station.lat != 0 && station.lng != 0).toList();
   }
