@@ -126,6 +126,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   bool _isApplyingFilter = false;
   bool _filterCheapestOnly = false;
   bool _includeRestricted = false;
+  int? _routeRadiusMeters;
   String? _stationsError;
   String? _stationsErrorDetails;
   List<Station> _stations = [];
@@ -139,6 +140,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   final Map<String, BitmapDescriptor> _priceIconCache = {};
   final Map<String, Future<BitmapDescriptor>> _priceIconLoaders = {};
   static const Color _restrictedMarkerColor = Color(0xFF5D6A70);
+  static const int _routeRadiusAutoSentinel = -1;
   bool _showTutorial = false;
   int _tutorialStepIndex = 0;
   late final List<_TutorialStep> _tutorialSteps = [
@@ -166,6 +168,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       description:
           'Puedes incluir estaciones con venta restringida (solo flotas o '
           'clientes autorizados) desde el filtro.',
+      targetKey: _filterKey,
+    ),
+    _TutorialStep(
+      title: 'Radio en ruta',
+      description:
+          'Cuando tengas una ruta, puedes ajustar el radio de muestra en ruta (500 m a 10 km) o '
+          'dejarlo en automatico desde el filtro.',
       targetKey: _filterKey,
     ),
     _TutorialStep(
@@ -197,6 +206,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _loadStations();
     _sessionToken = _uuid.v4();
     _loadMapStyle();
+    _loadRouteRadiusPreference();
     _initLocationAndNightMode();
     _maybeShowTutorial();
   }
@@ -211,6 +221,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         _showTutorial = true;
         _tutorialStepIndex = 0;
       });
+    });
+  }
+
+  Future<void> _loadRouteRadiusPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getInt('route_radius_meters');
+    if (!mounted || stored == null) return;
+    setState(() {
+      _routeRadiusMeters = stored <= 0 ? null : stored;
     });
   }
 
@@ -323,6 +342,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   key: _filterKey,
                   label: _filterLabel(),
                   onPressed: _openFuelFilter,
+                  icon: Icons.tune,
                   palette: _palette,
                 ),
               ],
@@ -541,6 +561,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         FuelOptionId? tempSelection = _selectedFuel;
         bool tempCheapestOnly = _filterCheapestOnly;
         bool tempIncludeRestricted = _includeRestricted;
+        bool tempRouteAuto = _routeRadiusMeters == null;
+        double tempRouteMeters = (_routeRadiusMeters ?? 2000).toDouble();
+        int? tempRouteRadiusMeters = _routeRadiusMeters;
         return StatefulBuilder(
           builder: (context, setModalState) {
             final media = MediaQuery.of(context);
@@ -632,7 +655,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                       style: TextStyle(color: palette.textPrimary),
                     ),
                     subtitle: Text(
-                      'Solo flotas o clientes autorizados.',
+                      'Solo para flotas o clientes autorizados.',
                       style: TextStyle(color: palette.textSecondary),
                     ),
                     value: tempIncludeRestricted,
@@ -641,6 +664,67 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                       tempIncludeRestricted = value;
                     }),
                   ),
+                  if (_hasRoute)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 8),
+                        Text(
+                          'Radio en ruta',
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    color: palette.textPrimary,
+                                  ),
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            'Automatico',
+                            style: TextStyle(color: palette.textPrimary),
+                          ),
+                          subtitle: Text(
+                            'Ajusta el radio segun la longitud de la ruta.',
+                            style: TextStyle(color: palette.textSecondary),
+                          ),
+                          value: tempRouteAuto,
+                          activeColor: palette.accent,
+                          onChanged: (value) => setModalState(() {
+                            tempRouteAuto = value;
+                            if (tempRouteAuto) {
+                              tempRouteRadiusMeters = null;
+                            } else {
+                              tempRouteMeters =
+                                  tempRouteMeters.clamp(500, 10000);
+                              tempRouteRadiusMeters =
+                                  tempRouteMeters.round();
+                            }
+                          }),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Radio: ${_formatRouteRadius(tempRouteMeters.round())}',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: palette.textPrimary,
+                              ),
+                        ),
+                        Slider(
+                          value: tempRouteMeters.clamp(500, 10000),
+                          min: 500,
+                          max: 10000,
+                          divisions: 95,
+                          label: _formatRouteRadius(tempRouteMeters.round()),
+                          onChanged: tempRouteAuto
+                              ? null
+                              : (value) => setModalState(() {
+                                    tempRouteMeters =
+                                        (value / 100).round() * 100.0;
+                                    tempRouteRadiusMeters =
+                                        tempRouteMeters.round();
+                                  }),
+                        ),
+                      ],
+                    ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -662,6 +746,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                               fuel: tempSelection,
                               cheapestOnly: tempCheapestOnly,
                               includeRestricted: tempIncludeRestricted,
+                              routeRadiusMeters: tempRouteRadiusMeters,
                             ),
                           ),
                           child: const Text('Aplicar'),
@@ -687,6 +772,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       result.fuel,
       result.cheapestOnly,
       result.includeRestricted,
+      result.routeRadiusMeters,
     );
   }
 
@@ -694,13 +780,32 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     FuelOptionId? selection,
     bool cheapestOnly,
     bool includeRestricted,
+    int? routeRadiusMeters,
   ) async {
+    final previousRouteRadius = _routeRadiusMeters;
     setState(() {
       _selectedFuel = selection;
       _filterCheapestOnly = cheapestOnly;
       _includeRestricted = includeRestricted;
+      _routeRadiusMeters = routeRadiusMeters;
     });
+    final routeRadiusChanged = previousRouteRadius != _routeRadiusMeters;
+    if (routeRadiusChanged) {
+      await _persistRouteRadiusPreference(_routeRadiusMeters);
+    }
+    if (_hasRoute && _routePoints.isNotEmpty && routeRadiusChanged) {
+      await _applyRouteFilter(_routePoints);
+      return;
+    }
     await _runWithFilterLoading(_rebuildMarkersForSelection);
+  }
+
+  Future<void> _persistRouteRadiusPreference(int? meters) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(
+      'route_radius_meters',
+      meters ?? _routeRadiusAutoSentinel,
+    );
   }
 
   Future<void> _rebuildMarkersForSelection() async {
@@ -1165,6 +1270,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     if (_includeRestricted) {
       base = '$base · incluye restringidas';
     }
+    if (_hasRoute) {
+      final radius = _routeRadiusMeters;
+      final radiusLabel =
+          radius == null ? 'radio auto' : 'radio ${_formatRouteRadius(radius)}';
+      base = '$base · $radiusLabel';
+    }
     return base;
   }
 
@@ -1211,11 +1322,24 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   double _routeThresholdMeters(List<LatLng> points) {
+    final fixedRadius = _routeRadiusMeters;
+    if (fixedRadius != null) return fixedRadius.toDouble();
     if (points.length < 2) return 2000;
     final length = _estimateRouteLengthMeters(points);
     if (length > 100000) return 2000;
     if (length > 50000) return 1800;
     return 1500;
+  }
+
+  String _formatRouteRadius(int meters) {
+    if (meters < 1000) {
+      return '$meters m';
+    }
+    if (meters % 1000 == 0) {
+      return '${meters ~/ 1000} km';
+    }
+    final km = meters / 1000;
+    return '${km.toStringAsFixed(1)} km';
   }
 
   double _estimateRouteLengthMeters(List<LatLng> points) {
@@ -2135,11 +2259,13 @@ class _FilterResult {
     required this.fuel,
     required this.cheapestOnly,
     required this.includeRestricted,
+    required this.routeRadiusMeters,
   });
 
   final FuelOptionId? fuel;
   final bool cheapestOnly;
   final bool includeRestricted;
+  final int? routeRadiusMeters;
 }
 
 class _FilterButton extends StatelessWidget {
@@ -2147,18 +2273,20 @@ class _FilterButton extends StatelessWidget {
     super.key,
     required this.label,
     required this.onPressed,
+    required this.icon,
     required this.palette,
   });
 
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
+  final IconData icon;
   final _MapUiPalette palette;
 
   @override
   Widget build(BuildContext context) {
     return OutlinedButton.icon(
       onPressed: onPressed,
-      icon: const Icon(Icons.local_gas_station),
+      icon: Icon(icon),
       label: Text(label),
       style: OutlinedButton.styleFrom(
         backgroundColor: palette.surface,

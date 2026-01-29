@@ -75,7 +75,7 @@ class StationSheet extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Venta restringida: solo flotas o clientes autorizados.',
+                        'Venta restringida: solo para flotas o clientes autorizados.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: const Color(0xFF8A6D3B),
                               fontWeight: FontWeight.w600,
