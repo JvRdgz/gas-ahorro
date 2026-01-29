@@ -125,6 +125,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   bool _loadingStations = true;
   bool _isApplyingFilter = false;
   bool _filterCheapestOnly = false;
+  bool _includeRestricted = false;
   String? _stationsError;
   String? _stationsErrorDetails;
   List<Station> _stations = [];
@@ -133,10 +134,11 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   double? _maxPrice;
   Set<Marker> _stationMarkers = const {};
   FuelOptionId? _selectedFuel;
-  final Map<double, BitmapDescriptor> _iconCache = {};
-  final Map<double, Future<BitmapDescriptor>> _iconLoaders = {};
+  final Map<int, BitmapDescriptor> _iconCache = {};
+  final Map<int, Future<BitmapDescriptor>> _iconLoaders = {};
   final Map<String, BitmapDescriptor> _priceIconCache = {};
   final Map<String, Future<BitmapDescriptor>> _priceIconLoaders = {};
+  static const Color _restrictedMarkerColor = Color(0xFF5D6A70);
   bool _showTutorial = false;
   int _tutorialStepIndex = 0;
   late final List<_TutorialStep> _tutorialSteps = [
@@ -462,12 +464,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Future<Set<Marker>> _buildUnselectedMarkers(
     List<Station> stations,
   ) async {
-    final icon = await _iconForHue(_unselectedHue);
+    final normalIcon = await _iconForColor(_colorForHue(_unselectedHue));
+    final restrictedIcon = await _iconForColor(_restrictedMarkerColor);
     return stations.map((station) {
       return Marker(
         markerId: MarkerId(station.id),
         position: LatLng(station.lat, station.lng),
-        icon: icon,
+        icon: station.isRestricted ? restrictedIcon : normalIcon,
         onTap: () => _showStationSheet(station),
       );
     }).toSet();
@@ -484,18 +487,22 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       final price = _priceForSelectedFuel(station);
       if (price == null) continue;
       final hue = _bucketHue(PriceColor.hueFor(price, minPrice, maxPrice));
+      final color =
+          station.isRestricted ? _restrictedMarkerColor : _colorForHue(hue);
       final label = _formatPrice(price);
-      final key = _PriceIconKey(hue, label);
+      final key = _PriceIconKey(color.value, label);
       iconKeys.add(key);
       stationIcons[station.id] = key;
     }
     await Future.wait(
-      iconKeys.map((key) => _iconForHueWithPrice(key.hue, key.label)),
+      iconKeys.map(
+        (key) => _iconForColorWithPrice(Color(key.colorValue), key.label),
+      ),
     );
     return stations.map((station) {
       final key = stationIcons[station.id];
       if (key == null) return null;
-      final icon = _priceIconCache[_priceCacheKey(key.hue, key.label)];
+      final icon = _priceIconCache[_priceCacheKey(key.colorValue, key.label)];
       if (icon == null) return null;
       return Marker(
         markerId: MarkerId(station.id),
@@ -523,6 +530,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       builder: (context) {
         FuelOptionId? tempSelection = _selectedFuel;
         bool tempCheapestOnly = _filterCheapestOnly;
+        bool tempIncludeRestricted = _includeRestricted;
         return StatefulBuilder(
           builder: (context, setModalState) {
             final media = MediaQuery.of(context);
@@ -605,6 +613,22 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                       tempCheapestOnly = value;
                     }),
                   ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      'Incluir venta restringida',
+                      style: TextStyle(color: palette.textPrimary),
+                    ),
+                    subtitle: Text(
+                      'Solo flotas o clientes autorizados.',
+                      style: TextStyle(color: palette.textSecondary),
+                    ),
+                    value: tempIncludeRestricted,
+                    activeColor: palette.accent,
+                    onChanged: (value) => setModalState(() {
+                      tempIncludeRestricted = value;
+                    }),
+                  ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -625,6 +649,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                             _FilterResult(
                               fuel: tempSelection,
                               cheapestOnly: tempCheapestOnly,
+                              includeRestricted: tempIncludeRestricted,
                             ),
                           ),
                           child: const Text('Aplicar'),
@@ -646,16 +671,22 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     );
 
     if (result == null) return;
-    await _applyFilter(result.fuel, result.cheapestOnly);
+    await _applyFilter(
+      result.fuel,
+      result.cheapestOnly,
+      result.includeRestricted,
+    );
   }
 
   Future<void> _applyFilter(
     FuelOptionId? selection,
     bool cheapestOnly,
+    bool includeRestricted,
   ) async {
     setState(() {
       _selectedFuel = selection;
       _filterCheapestOnly = cheapestOnly;
+      _includeRestricted = includeRestricted;
     });
     await _runWithFilterLoading(_rebuildMarkersForSelection);
   }
@@ -663,6 +694,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Future<void> _rebuildMarkersForSelection() async {
     if (_stations.isEmpty) return;
     final baseStations = _hasRoute ? _routeStations : _stations;
+    final visibleStations = _includeRestricted
+        ? baseStations
+        : baseStations.where((station) => !station.isRestricted).toList();
     if (baseStations.isEmpty) {
       setState(() {
         _stationMarkers = const {};
@@ -677,18 +711,32 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       return;
     }
 
+    if (visibleStations.isEmpty) {
+      setState(() {
+        _stationMarkers = const {};
+        _minPrice = null;
+        _maxPrice = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay estaciones publicas con el filtro actual.'),
+        ),
+      );
+      return;
+    }
+
     if (_selectedFuel == null) {
       setState(() {
         _minPrice = null;
         _maxPrice = null;
       });
-      await _setMarkersForStations(baseStations);
+      await _setMarkersForStations(visibleStations);
       return;
     }
 
     final entries = <Map<String, dynamic>>[];
-    for (var i = 0; i < baseStations.length; i++) {
-      final station = baseStations[i];
+    for (var i = 0; i < visibleStations.length; i++) {
+      final station = visibleStations[i];
       final price = _priceForSelectedFuel(station);
       if (price == null) continue;
       entries.add({
@@ -728,7 +776,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     }
     final minPrice = (result['minPrice'] as num).toDouble();
     final maxPrice = (result['maxPrice'] as num).toDouble();
-    final stationsToUse = indices.map((i) => baseStations[i]).toList();
+    final stationsToUse = indices.map((i) => visibleStations[i]).toList();
     await _setMarkersForStations(
       stationsToUse,
       minPrice: minPrice,
@@ -938,36 +986,35 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     return '${price.toStringAsFixed(3).replaceAll('.', ',')} €';
   }
 
-  String _priceCacheKey(double hue, String label) {
-    return '${hue.toStringAsFixed(0)}|$label';
+  String _priceCacheKey(int colorValue, String label) {
+    return '$colorValue|$label';
   }
 
-  Future<BitmapDescriptor> _iconForHue(double hue) async {
-    final bucketed = _bucketHue(hue);
-    final cached = _iconCache[bucketed];
+  Future<BitmapDescriptor> _iconForColor(Color color) async {
+    final key = color.value;
+    final cached = _iconCache[key];
     if (cached != null) return cached;
-    final pending = _iconLoaders[bucketed];
+    final pending = _iconLoaders[key];
     if (pending != null) return pending;
-    final future = _buildGasMarkerIcon(_colorForHue(bucketed));
-    _iconLoaders[bucketed] = future;
+    final future = _buildGasMarkerIcon(color);
+    _iconLoaders[key] = future;
     final icon = await future;
-    _iconCache[bucketed] = icon;
-    _iconLoaders.remove(bucketed);
+    _iconCache[key] = icon;
+    _iconLoaders.remove(key);
     return icon;
   }
 
-  Future<BitmapDescriptor> _iconForHueWithPrice(
-    double hue,
+  Future<BitmapDescriptor> _iconForColorWithPrice(
+    Color color,
     String label,
   ) async {
-    final bucketed = _bucketHue(hue);
-    final key = _priceCacheKey(bucketed, label);
+    final key = _priceCacheKey(color.value, label);
     final cached = _priceIconCache[key];
     if (cached != null) return cached;
     final pending = _priceIconLoaders[key];
     if (pending != null) return pending;
     final future = _buildGasMarkerIconWithPrice(
-      _colorForHue(bucketed),
+      color,
       label,
     );
     _priceIconLoaders[key] = future;
@@ -1098,15 +1145,21 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   String _filterLabel() {
     final selection = _selectedFuel;
-    final base =
+    var base =
         selection == null ? 'Selecciona combustible' : _fuelLabelFor(selection);
     if (_filterCheapestOnly && selection != null) {
-      return '$base · mas baratas';
+      base = '$base · mas baratas';
+    }
+    if (_includeRestricted) {
+      base = '$base · incluye restringidas';
     }
     return base;
   }
 
   Color _markerColorForStation(Station station) {
+    if (station.isRestricted) {
+      return _restrictedMarkerColor;
+    }
     if (_selectedFuel != null && _minPrice != null && _maxPrice != null) {
       final price = _priceForSelectedFuel(station);
       if (price != null) {
@@ -1985,20 +2038,20 @@ class _TutorialStep {
 }
 
 class _PriceIconKey {
-  const _PriceIconKey(this.hue, this.label);
+  const _PriceIconKey(this.colorValue, this.label);
 
-  final double hue;
+  final int colorValue;
   final String label;
 
   @override
   bool operator ==(Object other) {
     return other is _PriceIconKey &&
-        other.hue == hue &&
+        other.colorValue == colorValue &&
         other.label == label;
   }
 
   @override
-  int get hashCode => Object.hash(hue, label);
+  int get hashCode => Object.hash(colorValue, label);
 }
 
 class _ErrorState extends StatelessWidget {
@@ -2069,10 +2122,12 @@ class _FilterResult {
   const _FilterResult({
     required this.fuel,
     required this.cheapestOnly,
+    required this.includeRestricted,
   });
 
   final FuelOptionId? fuel;
   final bool cheapestOnly;
+  final bool includeRestricted;
 }
 
 class _FilterButton extends StatelessWidget {

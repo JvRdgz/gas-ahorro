@@ -6,6 +6,7 @@ class Station {
     required this.lat,
     required this.lng,
     required this.prices,
+    required this.isRestricted,
   });
 
   final String id;
@@ -14,6 +15,7 @@ class Station {
   final double lat;
   final double lng;
   final Map<String, double> prices;
+  final bool isRestricted;
 
   double? get bestPrice {
     if (prices.isEmpty) return null;
