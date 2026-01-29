@@ -1,7 +1,7 @@
 name: gas_ahorro
 publish_to: "none"
 description: App para ver precios de gasolineras en tiempo real.
-version: 0.1.0
+version: 1.0.0+2
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
