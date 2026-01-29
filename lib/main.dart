@@ -150,7 +150,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     ),
     _TutorialStep(
       title: 'Filtra combustible',
-      description: 'Selecciona el tipo de combustible para comparar precios.',
+      description:
+          'Selecciona el tipo de combustible y activa “Solo más baratas” si '
+          'quieres ver únicamente las mejores opciones.',
       targetKey: _filterKey,
     ),
     _TutorialStep(

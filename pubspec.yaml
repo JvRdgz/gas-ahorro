@@ -38,13 +38,8 @@ flutter_launcher_icons:
   remove_alpha_ios: false
 
 flutter_native_splash:
-  background_image: assets/splash/splash_background.png
-  image: assets/icon/logo.png
-  android_gravity: fill
-  ios_content_mode: scaleAspectFill
+  color: "#0B3A2B"
   android: true
   ios: true
   android_12:
     color: "#0B3A2B"
-    image: assets/icon/logo_android_foreground.png
-    icon_background_color: "#0B3A2B"
