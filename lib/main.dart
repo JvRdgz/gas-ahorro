@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -133,6 +134,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Set<Marker> _stationMarkers = const {};
   FuelOptionId? _selectedFuel;
   final Map<double, BitmapDescriptor> _iconCache = {};
+  final Map<double, Future<BitmapDescriptor>> _iconLoaders = {};
+  final Map<String, BitmapDescriptor> _priceIconCache = {};
+  final Map<String, Future<BitmapDescriptor>> _priceIconLoaders = {};
   bool _showTutorial = false;
   int _tutorialStepIndex = 0;
   late final List<_TutorialStep> _tutorialSteps = [
@@ -158,7 +162,14 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _TutorialStep(
       title: 'Toca una gasolinera',
       description:
-          'Pulsa un marcador para ver los detalles y precios disponibles.',
+          'Pulsa un surtidor para ver los detalles y precios disponibles.',
+      targetKey: _mapKey,
+    ),
+    _TutorialStep(
+      title: 'Precio en el mapa',
+      description:
+          'El precio del combustible seleccionado aparece junto al icono '
+          'para comparar de un vistazo.',
       targetKey: _mapKey,
     ),
     _TutorialStep(
@@ -448,36 +459,51 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     }
   }
 
-  Set<Marker> _buildUnselectedMarkers(List<Station> stations) {
+  Future<Set<Marker>> _buildUnselectedMarkers(
+    List<Station> stations,
+  ) async {
+    final icon = await _iconForHue(_unselectedHue);
     return stations.map((station) {
       return Marker(
         markerId: MarkerId(station.id),
         position: LatLng(station.lat, station.lng),
-        icon: _iconForHue(_unselectedHue),
+        icon: icon,
         onTap: () => _showStationSheet(station),
       );
     }).toSet();
   }
 
-  Set<Marker> _buildMarkersForSelection(
+  Future<Set<Marker>> _buildMarkersForSelection(
     List<Station> stations,
     double minPrice,
     double maxPrice,
-  ) {
-    return stations
-        .map((station) {
-          final price = _priceForSelectedFuel(station);
-          if (price == null) return null;
-          final hue = PriceColor.hueFor(price, minPrice, maxPrice);
-          return Marker(
-            markerId: MarkerId(station.id),
-            position: LatLng(station.lat, station.lng),
-            icon: _iconForHue(hue),
-            onTap: () => _showStationSheet(station),
-          );
-        })
-        .whereType<Marker>()
-        .toSet();
+  ) async {
+    final iconKeys = <_PriceIconKey>{};
+    final stationIcons = <String, _PriceIconKey>{};
+    for (final station in stations) {
+      final price = _priceForSelectedFuel(station);
+      if (price == null) continue;
+      final hue = _bucketHue(PriceColor.hueFor(price, minPrice, maxPrice));
+      final label = _formatPrice(price);
+      final key = _PriceIconKey(hue, label);
+      iconKeys.add(key);
+      stationIcons[station.id] = key;
+    }
+    await Future.wait(
+      iconKeys.map((key) => _iconForHueWithPrice(key.hue, key.label)),
+    );
+    return stations.map((station) {
+      final key = stationIcons[station.id];
+      if (key == null) return null;
+      final icon = _priceIconCache[_priceCacheKey(key.hue, key.label)];
+      if (icon == null) return null;
+      return Marker(
+        markerId: MarkerId(station.id),
+        position: LatLng(station.lat, station.lng),
+        icon: icon,
+        onTap: () => _showStationSheet(station),
+      );
+    }).whereType<Marker>().toSet();
   }
 
   double? _priceForSelectedFuel(Station station) {
@@ -789,8 +815,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     final minPrice = _markerMinPrice;
     final maxPrice = _markerMaxPrice;
     final markers = (minPrice != null && maxPrice != null)
-        ? _buildMarkersForSelection(stationsToRender, minPrice, maxPrice)
-        : _buildUnselectedMarkers(stationsToRender);
+        ? await _buildMarkersForSelection(stationsToRender, minPrice, maxPrice)
+        : await _buildUnselectedMarkers(stationsToRender);
     await _setMarkersInBatches(markers);
   }
 
@@ -904,12 +930,165 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     });
   }
 
-  BitmapDescriptor _iconForHue(double hue) {
-    final bucketed = (hue / 5).round() * 5.0;
-    return _iconCache.putIfAbsent(
-      bucketed,
-      () => BitmapDescriptor.defaultMarkerWithHue(bucketed),
+  double _bucketHue(double hue) {
+    return (hue / 10).round() * 10.0;
+  }
+
+  String _formatPrice(double price) {
+    return '${price.toStringAsFixed(3).replaceAll('.', ',')} €';
+  }
+
+  String _priceCacheKey(double hue, String label) {
+    return '${hue.toStringAsFixed(0)}|$label';
+  }
+
+  Future<BitmapDescriptor> _iconForHue(double hue) async {
+    final bucketed = _bucketHue(hue);
+    final cached = _iconCache[bucketed];
+    if (cached != null) return cached;
+    final pending = _iconLoaders[bucketed];
+    if (pending != null) return pending;
+    final future = _buildGasMarkerIcon(_colorForHue(bucketed));
+    _iconLoaders[bucketed] = future;
+    final icon = await future;
+    _iconCache[bucketed] = icon;
+    _iconLoaders.remove(bucketed);
+    return icon;
+  }
+
+  Future<BitmapDescriptor> _iconForHueWithPrice(
+    double hue,
+    String label,
+  ) async {
+    final bucketed = _bucketHue(hue);
+    final key = _priceCacheKey(bucketed, label);
+    final cached = _priceIconCache[key];
+    if (cached != null) return cached;
+    final pending = _priceIconLoaders[key];
+    if (pending != null) return pending;
+    final future = _buildGasMarkerIconWithPrice(
+      _colorForHue(bucketed),
+      label,
     );
+    _priceIconLoaders[key] = future;
+    final icon = await future;
+    _priceIconCache[key] = icon;
+    _priceIconLoaders.remove(key);
+    return icon;
+  }
+
+  Color _colorForHue(double hue) {
+    return HSVColor.fromAHSV(1, hue, 0.85, 0.9).toColor();
+  }
+
+  Future<BitmapDescriptor> _buildGasMarkerIcon(Color color) async {
+    const circleSize = 84.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final center = const Offset(circleSize / 2, circleSize / 2);
+    final radius = circleSize / 2;
+
+    final paint = Paint()..color = color;
+    canvas.drawCircle(center, radius, paint);
+
+    const icon = Icons.local_gas_station;
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: String.fromCharCode(icon.codePoint),
+        style: TextStyle(
+          fontSize: 42,
+          fontFamily: icon.fontFamily,
+          package: icon.fontPackage,
+          color: Colors.white,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final offset = Offset(
+      center.dx - textPainter.width / 2,
+      center.dy - textPainter.height / 2,
+    );
+    textPainter.paint(canvas, offset);
+
+    final image = await recorder
+        .endRecording()
+        .toImage(circleSize.toInt(), circleSize.toInt());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
+  }
+
+  Future<BitmapDescriptor> _buildGasMarkerIconWithPrice(
+    Color color,
+    String label,
+  ) async {
+    const circleSize = 88.0;
+    const pillHeight = 52.0;
+    const pillRadius = 22.0;
+    const textSize = 34.0;
+    const pillPadding = 20.0;
+    const gap = 14.0;
+
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: const TextStyle(
+          fontSize: textSize,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF163027),
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    final pillWidth = textPainter.width + pillPadding * 2;
+    final width = circleSize + gap + pillWidth;
+    final height = circleSize;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final center = const Offset(circleSize / 2, circleSize / 2);
+    final radius = circleSize / 2;
+
+    final paint = Paint()..color = color;
+    canvas.drawCircle(center, radius, paint);
+
+    const icon = Icons.local_gas_station;
+    final iconPainter = TextPainter(
+      text: TextSpan(
+        text: String.fromCharCode(icon.codePoint),
+        style: TextStyle(
+          fontSize: 52,
+          fontFamily: icon.fontFamily,
+          package: icon.fontPackage,
+          color: Colors.white,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final iconOffset = Offset(
+      center.dx - iconPainter.width / 2,
+      center.dy - iconPainter.height / 2,
+    );
+    iconPainter.paint(canvas, iconOffset);
+
+    final pillLeft = circleSize - 6;
+    final pillTop = (height - pillHeight) / 2;
+    final pillRect = Rect.fromLTWH(pillLeft, pillTop, pillWidth, pillHeight);
+    final pillPaint = Paint()..color = const Color(0xFFF6FBF8);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(pillRect, const Radius.circular(pillRadius)),
+      pillPaint,
+    );
+    final textOffset = Offset(
+      pillLeft + pillPadding,
+      pillTop + (pillHeight - textPainter.height) / 2,
+    );
+    textPainter.paint(canvas, textOffset);
+
+    final image =
+        await recorder.endRecording().toImage(width.toInt(), height.toInt());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
   }
 
   String _fuelLabelFor(FuelOptionId? selection) {
@@ -1803,6 +1982,23 @@ class _TutorialStep {
   final String title;
   final String description;
   final GlobalKey targetKey;
+}
+
+class _PriceIconKey {
+  const _PriceIconKey(this.hue, this.label);
+
+  final double hue;
+  final String label;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _PriceIconKey &&
+        other.hue == hue &&
+        other.label == label;
+  }
+
+  @override
+  int get hashCode => Object.hash(hue, label);
 }
 
 class _ErrorState extends StatelessWidget {
