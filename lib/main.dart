@@ -1213,9 +1213,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   double _routeThresholdMeters(List<LatLng> points) {
     if (points.length < 2) return 2000;
     final length = _estimateRouteLengthMeters(points);
-    if (length > 250000) return 5000;
-    if (length > 100000) return 3500;
-    return 2500;
+    if (length > 100000) return 2000;
+    if (length > 50000) return 1800;
+    return 1500;
   }
 
   double _estimateRouteLengthMeters(List<LatLng> points) {
