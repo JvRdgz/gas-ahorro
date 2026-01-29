@@ -162,6 +162,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       targetKey: _filterKey,
     ),
     _TutorialStep(
+      title: 'Venta restringida',
+      description:
+          'Puedes incluir estaciones con venta restringida (solo flotas o '
+          'clientes autorizados) desde el filtro.',
+      targetKey: _filterKey,
+    ),
+    _TutorialStep(
       title: 'Toca una gasolinera',
       description:
           'Pulsa un surtidor para ver los detalles y precios disponibles.',
