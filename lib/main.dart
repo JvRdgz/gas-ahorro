@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import 'models/place_prediction.dart';
@@ -94,6 +95,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   final _sunTimesApi = SunTimesApi();
   final _directionsApi = DirectionsApi();
   final _uuid = const Uuid();
+  final _mapKey = GlobalKey();
+  final _searchKey = GlobalKey();
+  final _filterKey = GlobalKey();
+  final _routeKey = GlobalKey();
 
   GoogleMapController? _mapController;
   List<Station> _markerStationsSource = const [];
@@ -128,6 +133,42 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   Set<Marker> _stationMarkers = const {};
   FuelOptionId? _selectedFuel;
   final Map<double, BitmapDescriptor> _iconCache = {};
+  bool _showTutorial = false;
+  int _tutorialStepIndex = 0;
+  late final List<_TutorialStep> _tutorialSteps = [
+    _TutorialStep(
+      title: 'Busca tu destino',
+      description:
+          'Escribe un lugar y elige una sugerencia para trazar la ruta.',
+      targetKey: _searchKey,
+    ),
+    _TutorialStep(
+      title: 'Ver la ruta',
+      description:
+          'La ruta se mostrará en el mapa con las gasolineras que estén de camino.',
+      targetKey: _routeKey,
+    ),
+    _TutorialStep(
+      title: 'Filtra combustible',
+      description:
+          'Selecciona el tipo de combustible y activa “Solo más baratas” si '
+          'quieres ver únicamente las mejores opciones.',
+      targetKey: _filterKey,
+    ),
+    _TutorialStep(
+      title: 'Toca una gasolinera',
+      description:
+          'Pulsa un marcador para ver los detalles y precios disponibles.',
+      targetKey: _mapKey,
+    ),
+    _TutorialStep(
+      title: 'Navegar con “Ir”',
+      description:
+          'Al abrir una gasolinera, el botón “Ir” abre tu app de navegación '
+          'por defecto y crea la ruta con esa parada.',
+      targetKey: _mapKey,
+    ),
+  ];
 
   @override
   void initState() {
@@ -137,6 +178,20 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _sessionToken = _uuid.v4();
     _loadMapStyle();
     _initLocationAndNightMode();
+    _maybeShowTutorial();
+  }
+
+  Future<void> _maybeShowTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    final seen = prefs.getBool('onboarding_seen') ?? false;
+    if (seen || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _showTutorial = true;
+        _tutorialStepIndex = 0;
+      });
+    });
   }
 
   @override
@@ -186,27 +241,30 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
     return Stack(
       children: [
-        GoogleMap(
-          initialCameraPosition: CameraPosition(
-            target: LatLng(_stations.first.lat, _stations.first.lng),
-            zoom: 6,
+        KeyedSubtree(
+          key: _mapKey,
+          child: GoogleMap(
+            initialCameraPosition: CameraPosition(
+              target: LatLng(_stations.first.lat, _stations.first.lng),
+              zoom: 6,
+            ),
+            padding: EdgeInsets.only(
+              top: viewPadding.top,
+              bottom: viewPadding.bottom + 12,
+            ),
+            onMapCreated: (controller) {
+              _mapController = controller;
+              _applyMapStyle();
+              if (_markerStationsSource.isNotEmpty) {
+                _refreshVisibleMarkers();
+              }
+            },
+            onCameraIdle: _onCameraIdle,
+            myLocationEnabled: true,
+            myLocationButtonEnabled: false,
+            markers: _stationMarkers,
+            polylines: _routePolylines,
           ),
-          padding: EdgeInsets.only(
-            top: viewPadding.top,
-            bottom: viewPadding.bottom + 12,
-          ),
-          onMapCreated: (controller) {
-            _mapController = controller;
-            _applyMapStyle();
-            if (_markerStationsSource.isNotEmpty) {
-              _refreshVisibleMarkers();
-            }
-          },
-          onCameraIdle: _onCameraIdle,
-          myLocationEnabled: true,
-          myLocationButtonEnabled: false,
-          markers: _stationMarkers,
-          polylines: _routePolylines,
         ),
         SafeArea(
           child: Padding(
@@ -222,6 +280,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 8),
                 _SearchBar(
+                  key: _searchKey,
                   controller: _searchController,
                   focusNode: _searchFocusNode,
                   onChanged: _onSearchChanged,
@@ -241,6 +300,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   ),
                 const SizedBox(height: 10),
                 _FilterButton(
+                  key: _filterKey,
                   label: _filterLabel(),
                   onPressed: _openFuelFilter,
                   palette: _palette,
@@ -279,12 +339,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 child: const Icon(Icons.my_location),
               ),
               const SizedBox(height: 12),
-                  FloatingActionButton.extended(
-                    heroTag: 'fab-route',
-                    onPressed: _onRoutePressed,
-                    icon: const Icon(Icons.alt_route),
-                    label: const Text('Ruta'),
-                  ),
+              FloatingActionButton.extended(
+                heroTag: 'fab-route',
+                onPressed: _onRoutePressed,
+                key: _routeKey,
+                icon: const Icon(Icons.alt_route),
+                label: const Text('Ruta'),
+              ),
             ],
           ),
         ),
@@ -295,8 +356,47 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
               child: const Center(child: CircularProgressIndicator()),
             ),
           ),
+        if (_showTutorial)
+          _TutorialOverlay(
+            step: _tutorialSteps[_tutorialStepIndex],
+            stepIndex: _tutorialStepIndex,
+            totalSteps: _tutorialSteps.length,
+            targetRect:
+                _rectForKey(_tutorialSteps[_tutorialStepIndex].targetKey),
+            onSkip: _endTutorial,
+            onNext: _nextTutorialStep,
+          ),
       ],
     );
+  }
+
+  Rect? _rectForKey(GlobalKey key) {
+    final context = key.currentContext;
+    if (context == null) return null;
+    final renderObject = context.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) return null;
+    final offset = renderObject.localToGlobal(Offset.zero);
+    return offset & renderObject.size;
+  }
+
+  Future<void> _endTutorial() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('onboarding_seen', true);
+    if (!mounted) return;
+    setState(() {
+      _showTutorial = false;
+    });
+  }
+
+  void _nextTutorialStep() {
+    final isLast = _tutorialStepIndex >= _tutorialSteps.length - 1;
+    if (isLast) {
+      _endTutorial();
+      return;
+    }
+    setState(() {
+      _tutorialStepIndex += 1;
+    });
   }
 
   Future<void> _loadStations() async {
@@ -364,17 +464,20 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     double minPrice,
     double maxPrice,
   ) {
-    return stations.map((station) {
-      final price = _priceForSelectedFuel(station);
-      if (price == null) return null;
-      final hue = PriceColor.hueFor(price, minPrice, maxPrice);
-      return Marker(
-        markerId: MarkerId(station.id),
-        position: LatLng(station.lat, station.lng),
-        icon: _iconForHue(hue),
-        onTap: () => _showStationSheet(station),
-      );
-    }).whereType<Marker>().toSet();
+    return stations
+        .map((station) {
+          final price = _priceForSelectedFuel(station);
+          if (price == null) return null;
+          final hue = PriceColor.hueFor(price, minPrice, maxPrice);
+          return Marker(
+            markerId: MarkerId(station.id),
+            position: LatLng(station.lat, station.lng),
+            icon: _iconForHue(hue),
+            onTap: () => _showStationSheet(station),
+          );
+        })
+        .whereType<Marker>()
+        .toSet();
   }
 
   double? _priceForSelectedFuel(Station station) {
@@ -501,9 +604,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                           child: const Text('Aplicar'),
                           style: FilledButton.styleFrom(
                             backgroundColor: palette.accent,
-                            foregroundColor: palette.isDark
-                                ? Colors.black87
-                                : Colors.white,
+                            foregroundColor:
+                                palette.isDark ? Colors.black87 : Colors.white,
                           ),
                         ),
                       ),
@@ -733,8 +835,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       return stations;
     }
 
-    final midLat =
-        (bounds.northeast.latitude + bounds.southwest.latitude) / 2;
+    final midLat = (bounds.northeast.latitude + bounds.southwest.latitude) / 2;
     final metersPerDegreeLat = 111320.0;
     final metersPerDegreeLng =
         math.max(1e-6, 111320.0 * math.cos(midLat * math.pi / 180));
@@ -813,16 +914,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   String _fuelLabelFor(FuelOptionId? selection) {
     if (selection == null) return '';
-    return _fuelOptions
-        .firstWhere((option) => option.id == selection)
-        .label;
+    return _fuelOptions.firstWhere((option) => option.id == selection).label;
   }
 
   String _filterLabel() {
     final selection = _selectedFuel;
-    final base = selection == null
-        ? 'Selecciona combustible'
-        : _fuelLabelFor(selection);
+    final base =
+        selection == null ? 'Selecciona combustible' : _fuelLabelFor(selection);
     if (_filterCheapestOnly && selection != null) {
       return '$base · mas baratas';
     }
@@ -1210,9 +1308,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       );
       if (!mounted) return;
 
-      final polylinePoints = points
-          .map((point) => LatLng(point['lat']!, point['lng']!))
-          .toList();
+      final polylinePoints =
+          points.map((point) => LatLng(point['lat']!, point['lng']!)).toList();
       setState(() {
         _routePolylines = {
           Polyline(
@@ -1251,10 +1348,26 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   LatLngBounds _boundsFromLatLng(List<LatLng> points) {
     double? minLat, maxLat, minLng, maxLng;
     for (final point in points) {
-      minLat = minLat == null ? point.latitude : minLat < point.latitude ? minLat : point.latitude;
-      maxLat = maxLat == null ? point.latitude : maxLat > point.latitude ? maxLat : point.latitude;
-      minLng = minLng == null ? point.longitude : minLng < point.longitude ? minLng : point.longitude;
-      maxLng = maxLng == null ? point.longitude : maxLng > point.longitude ? maxLng : point.longitude;
+      minLat = minLat == null
+          ? point.latitude
+          : minLat < point.latitude
+              ? minLat
+              : point.latitude;
+      maxLat = maxLat == null
+          ? point.latitude
+          : maxLat > point.latitude
+              ? maxLat
+              : point.latitude;
+      minLng = minLng == null
+          ? point.longitude
+          : minLng < point.longitude
+              ? minLng
+              : point.longitude;
+      maxLng = maxLng == null
+          ? point.longitude
+          : maxLng > point.longitude
+              ? maxLng
+              : point.longitude;
     }
     return LatLngBounds(
       southwest: LatLng(minLat ?? 0, minLng ?? 0),
@@ -1398,6 +1511,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
 class _SearchBar extends StatelessWidget {
   const _SearchBar({
+    super.key,
     required this.controller,
     required this.focusNode,
     required this.onChanged,
@@ -1526,6 +1640,171 @@ class _PredictionsList extends StatelessWidget {
   }
 }
 
+class _TutorialOverlay extends StatelessWidget {
+  const _TutorialOverlay({
+    required this.step,
+    required this.stepIndex,
+    required this.totalSteps,
+    required this.targetRect,
+    required this.onSkip,
+    required this.onNext,
+  });
+
+  final _TutorialStep step;
+  final int stepIndex;
+  final int totalSteps;
+  final Rect? targetRect;
+  final VoidCallback onSkip;
+  final VoidCallback onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final safe = media.padding;
+    final screenHeight = media.size.height;
+    final hasTarget = targetRect != null;
+    final hole =
+        (targetRect ?? Rect.fromLTWH(0, screenHeight * 0.5, 0, 0)).inflate(12);
+    final preferBelow = !hasTarget || hole.center.dy < screenHeight * 0.6;
+    final maxCardHeight = 210.0;
+    final minTop = safe.top + 16;
+    final maxTop = screenHeight - safe.bottom - maxCardHeight - 16;
+    final minBottom = safe.bottom + 16;
+    final maxBottom = screenHeight - safe.top - maxCardHeight - 16;
+    double? top;
+    double? bottom;
+    if (preferBelow) {
+      final proposed = (hasTarget ? hole.bottom : screenHeight * 0.28) + 16;
+      top = math.min(maxTop, math.max(minTop, proposed));
+    } else {
+      final proposed =
+          (screenHeight - (hasTarget ? hole.top : screenHeight * 0.5)) + 16;
+      bottom = math.min(maxBottom, math.max(minBottom, proposed));
+    }
+
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {},
+            child: CustomPaint(
+              painter: _TutorialPainter(
+                holeRect: hole,
+                overlayColor: Colors.black.withValues(alpha: 0.55),
+              ),
+            ),
+          ),
+          Positioned(
+            top: safe.top + 4,
+            right: 16,
+            child: TextButton(
+              onPressed: onSkip,
+              child: const Text('Saltar'),
+            ),
+          ),
+          Positioned(
+            left: 16,
+            right: 16,
+            top: top,
+            bottom: bottom,
+            child: Material(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              elevation: 8,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      step.title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      step.description,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Text(
+                          '${stepIndex + 1} / $totalSteps',
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelMedium
+                              ?.copyWith(color: Colors.grey[600]),
+                        ),
+                        const Spacer(),
+                        ElevatedButton(
+                          onPressed: onNext,
+                          child: Text(
+                            stepIndex == totalSteps - 1
+                                ? 'Empezar'
+                                : 'Siguiente',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TutorialPainter extends CustomPainter {
+  _TutorialPainter({
+    required this.holeRect,
+    required this.overlayColor,
+  });
+
+  final Rect? holeRect;
+  final Color overlayColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    canvas.saveLayer(rect, Paint());
+    canvas.drawRect(rect, Paint()..color = overlayColor);
+    if (holeRect != null) {
+      final clearPaint = Paint()..blendMode = BlendMode.clear;
+      final rrect = RRect.fromRectAndRadius(
+        holeRect!,
+        const Radius.circular(16),
+      );
+      canvas.drawRRect(rrect, clearPaint);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _TutorialPainter oldDelegate) {
+    return oldDelegate.holeRect != holeRect ||
+        oldDelegate.overlayColor != overlayColor;
+  }
+}
+
+class _TutorialStep {
+  const _TutorialStep({
+    required this.title,
+    required this.description,
+    required this.targetKey,
+  });
+
+  final String title;
+  final String description;
+  final GlobalKey targetKey;
+}
+
 class _ErrorState extends StatelessWidget {
   const _ErrorState({
     required this.message,
@@ -1602,6 +1881,7 @@ class _FilterResult {
 
 class _FilterButton extends StatelessWidget {
   const _FilterButton({
+    super.key,
     required this.label,
     required this.onPressed,
     required this.palette,
