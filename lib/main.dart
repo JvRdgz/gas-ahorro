@@ -21,7 +21,11 @@ import 'utils/price_color.dart';
 import 'widgets/price_legend.dart';
 import 'widgets/station_sheet.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (defaultTargetPlatform == TargetPlatform.iOS) {
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+  }
   runApp(const GasAhorroApp());
 }
 
