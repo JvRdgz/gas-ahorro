@@ -73,22 +73,32 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _FuelOption(
       id: FuelOptionId.gasolina95,
       label: 'Gasolina 95',
+      color: Color(0xFF1B8E3E),
+    ),
+    _FuelOption(
+      id: FuelOptionId.gasoleoA,
+      label: 'Diesel normal',
+      color: Color(0xFF30343A),
+    ),
+    _FuelOption(
+      id: FuelOptionId.glp,
+      label: 'GLP',
+      color: Color(0xFFF28C28),
     ),
     _FuelOption(
       id: FuelOptionId.gasolina98,
       label: 'Gasolina 98',
+      color: Color(0xFF4AAE6C),
     ),
     _FuelOption(
-      id: FuelOptionId.gasoleoA,
-      label: 'Gasoleo A / Diesel normal',
+      id: FuelOptionId.gnc,
+      label: 'GNC',
+      color: Color(0xFF2B6CB0),
     ),
     _FuelOption(
       id: FuelOptionId.gasoleoPremium,
-      label: 'Gasoleo Premium / Diesel premium',
-    ),
-    _FuelOption(
-      id: FuelOptionId.gas,
-      label: 'GAS / GLP / GNC',
+      label: 'Diesel premium',
+      color: Color(0xFFC79B2A),
     ),
   ];
 
@@ -584,42 +594,64 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Selecciona combustible',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: palette.textPrimary,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Selecciona combustible',
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: palette.textPrimary,
+                                  ),
                         ),
+                      ),
+                      TextButton(
+                        onPressed: (tempSelection == null &&
+                                !tempCheapestOnly &&
+                                !tempIncludeRestricted &&
+                                tempRouteAuto)
+                            ? null
+                            : () => setModalState(() {
+                                  tempSelection = null;
+                                  tempCheapestOnly = false;
+                                  tempIncludeRestricted = false;
+                                  tempRouteAuto = true;
+                                  tempRouteMeters = 2000;
+                                  tempRouteRadiusMeters = null;
+                                }),
+                        child: const Text('Limpiar'),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      ChoiceChip(
-                        label: Text(
-                          'Sin filtro',
-                          style: TextStyle(color: palette.textPrimary),
-                        ),
-                        selected: tempSelection == null,
-                        selectedColor: palette.isDark
-                            ? palette.accent.withOpacity(0.35)
-                            : const Color(0xFFE6F4EE),
-                        backgroundColor: palette.surfaceAlt,
-                        checkmarkColor:
-                            palette.isDark ? Colors.black87 : palette.accent,
-                        side: BorderSide(color: palette.border),
-                        onSelected: (_) => setModalState(() {
-                          tempSelection = null;
-                          tempIncludeRestricted = false;
-                          tempCheapestOnly = false;
-                        }),
-                      ),
                       ..._fuelOptions.map((option) {
+                        final chipLabel = Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 10,
+                              height: 10,
+                              decoration: BoxDecoration(
+                                color: option.color,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              option.label,
+                              style: TextStyle(
+                                color: palette.textPrimary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        );
                         return ChoiceChip(
-                          label: Text(
-                            option.label,
-                            style: TextStyle(color: palette.textPrimary),
-                          ),
+                          label: chipLabel,
                           selected: tempSelection == option.id,
                           selectedColor: palette.isDark
                               ? palette.accent.withOpacity(0.35)
@@ -1446,14 +1478,16 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       return FuelOptionId.gasoleoA;
     }
     if (key.contains('GLP') ||
-        key.contains('GNC') ||
-        key.contains('GNL') ||
-        key.contains('GASNATURAL') ||
         key.contains('GASESLICUADOSDELPETROLEO') ||
         key.contains('AUTOGAS') ||
-        key.contains('BIOGASNATURAL') ||
         key.contains('GASLICUADO')) {
-      return FuelOptionId.gas;
+      return FuelOptionId.glp;
+    }
+    if (key.contains('GNC') ||
+        key.contains('GNL') ||
+        key.contains('GASNATURAL') ||
+        key.contains('BIOGASNATURAL')) {
+      return FuelOptionId.gnc;
     }
     return null;
   }
@@ -2245,17 +2279,20 @@ enum FuelOptionId {
   gasolina98,
   gasoleoA,
   gasoleoPremium,
-  gas,
+  glp,
+  gnc,
 }
 
 class _FuelOption {
   const _FuelOption({
     required this.id,
     required this.label,
+    required this.color,
   });
 
   final FuelOptionId id;
   final String label;
+  final Color color;
 }
 
 class _FilterResult {
