@@ -29,12 +29,12 @@ class PriceLegend extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: backgroundColor ?? Colors.white.withOpacity(0.9),
+        color: backgroundColor ?? Colors.white.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(12),
         border: borderColor == null ? null : Border.all(color: borderColor!),
         boxShadow: [
           BoxShadow(
-            color: (shadowColor ?? Colors.black26).withOpacity(0.6),
+            color: (shadowColor ?? Colors.black26).withValues(alpha: 0.6),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
