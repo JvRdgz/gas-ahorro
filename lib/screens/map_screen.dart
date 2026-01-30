@@ -1128,6 +1128,16 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     return '$colorValue-$label';
   }
 
+  double _markerScale() {
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      final ratio = ui.PlatformDispatcher.instance.views.first.devicePixelRatio;
+      if (ratio > 0) {
+        return 1 / ratio;
+      }
+    }
+    return 1;
+  }
+
   Future<BitmapDescriptor> _iconForColorWithPrice(
     Color color,
     String label,
@@ -1143,23 +1153,28 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<BitmapDescriptor> _drawIconWithPrice(Color color, String label) async {
-    const double circleSize = 78;
-    const double pillHeight = 58;
-    const double pillPadding = 20;
-    const double pillRadius = 26;
+    const double baseCircleSize = 78;
+    const double basePillHeight = 58;
+    const double basePillPadding = 20;
+    const double basePillRadius = 26;
+    final scale = _markerScale();
+    final circleSize = baseCircleSize * scale;
+    final pillHeight = basePillHeight * scale;
+    final pillPadding = basePillPadding * scale;
+    final pillRadius = basePillRadius * scale;
     final textPainter = TextPainter(
       text: TextSpan(
         text: label,
-        style: const TextStyle(
-          fontSize: 32,
+        style: TextStyle(
+          fontSize: 32 * scale,
           fontWeight: FontWeight.w700,
           color: Colors.black87,
         ),
-        children: const [
+        children: [
           TextSpan(
             text: ' €',
             style: TextStyle(
-              fontSize: 33,
+              fontSize: 33 * scale,
               fontWeight: FontWeight.w600,
               color: Colors.black54,
             ),
@@ -1170,7 +1185,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     )..layout();
 
     final pillWidth = textPainter.width + pillPadding * 2;
-    final width = circleSize + pillWidth + 6;
+    final width = circleSize + pillWidth + (6 * scale);
     final height = math.max(circleSize, pillHeight);
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(
@@ -1179,7 +1194,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     );
 
     final center = Offset(circleSize / 2, height / 2);
-    const radius = circleSize / 2;
+    final radius = circleSize / 2;
     final paint = Paint()..color = color;
     canvas.drawCircle(center, radius, paint);
 
@@ -1188,7 +1203,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       text: TextSpan(
         text: String.fromCharCode(icon.codePoint),
         style: TextStyle(
-          fontSize: 58,
+          fontSize: 58 * scale,
           fontFamily: icon.fontFamily,
           package: icon.fontPackage,
           color: Colors.white,
@@ -1202,12 +1217,12 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     );
     iconPainter.paint(canvas, iconOffset);
 
-    const pillLeft = circleSize - 6;
+    final pillLeft = circleSize - (6 * scale);
     final pillTop = (height - pillHeight) / 2;
     final pillRect = Rect.fromLTWH(pillLeft, pillTop, pillWidth, pillHeight);
     final pillPaint = Paint()..color = const Color(0xFFF6FBF8);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(pillRect, const Radius.circular(pillRadius)),
+      RRect.fromRectAndRadius(pillRect, Radius.circular(pillRadius)),
       pillPaint,
     );
     final textOffset = Offset(
@@ -1226,14 +1241,16 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<BitmapDescriptor> _drawIcon(Color color) async {
-    const double size = 70;
+    const double baseSize = 70;
+    final scale = _markerScale();
+    final size = baseSize * scale;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(
       recorder,
-      const Rect.fromLTWH(0, 0, size, size),
+      Rect.fromLTWH(0, 0, size, size),
     );
 
-    const center = Offset(size / 2, size / 2);
+    final center = Offset(size / 2, size / 2);
     final paint = Paint()..color = color;
     canvas.drawCircle(center, size / 2, paint);
 
@@ -1242,7 +1259,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       text: TextSpan(
         text: String.fromCharCode(icon.codePoint),
         style: TextStyle(
-          fontSize: 46,
+          fontSize: 46 * scale,
           fontFamily: icon.fontFamily,
           package: icon.fontPackage,
           color: Colors.white,
