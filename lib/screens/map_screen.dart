@@ -355,7 +355,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             onCameraIdle: _onCameraIdle,
             markers: _stationMarkers,
             polylines: _routePolylines,
-            onTap: (_) => _searchFocusNode.unfocus(),
+            onTap: (_) => _dismissKeyboard(),
           ),
         ),
         if (_isApplyingFilter)
@@ -406,6 +406,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       return offset & renderObject.size;
     }
     return null;
+  }
+
+  void _dismissKeyboard() {
+    final focus = FocusManager.instance.primaryFocus;
+    if (focus != null) {
+      focus.unfocus();
+    }
   }
 
   void _dismissTutorial() {
@@ -1530,6 +1537,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   void _onSearchSubmitted(String query) async {
+    _dismissKeyboard();
     if (_predictions.isNotEmpty) {
       await _onPredictionSelected(_predictions.first);
       return;
@@ -1575,7 +1583,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _onPredictionSelected(PlacePrediction prediction) async {
-    FocusScope.of(context).unfocus();
+    _dismissKeyboard();
     setState(() {
       _loadingPredictions = true;
       _predictions = [];
@@ -1801,7 +1809,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _clearRouteAndSearch() async {
-    FocusScope.of(context).unfocus();
+    _dismissKeyboard();
     _searchController.clear();
     _sessionToken = _uuid.v4();
     setState(() {

@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
@@ -55,19 +56,36 @@ class TutorialOverlay extends StatelessWidget {
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () {},
-            child: CustomPaint(
-              painter: _TutorialPainter(
-                holeRect: hole,
-                overlayColor: Colors.black.withValues(alpha: 0.55),
+            child: SizedBox.expand(
+              child: ClipPath(
+                clipper: _TutorialScrimClipper(holeRect: hole),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.55),
+                  ),
+                ),
               ),
             ),
           ),
           Positioned(
             top: safe.top + 4,
             right: 16,
-            child: TextButton(
+            child: FilledButton(
               onPressed: onSkip,
-              child: const Text('Saltar'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Saltar',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
             ),
           ),
           Positioned(
@@ -142,34 +160,24 @@ class TutorialStep {
   final GlobalKey targetKey;
 }
 
-class _TutorialPainter extends CustomPainter {
-  _TutorialPainter({
-    required this.holeRect,
-    required this.overlayColor,
-  });
+class _TutorialScrimClipper extends CustomClipper<Path> {
+  _TutorialScrimClipper({required this.holeRect});
 
-  final Rect? holeRect;
-  final Color overlayColor;
+  final Rect holeRect;
 
   @override
-  void paint(Canvas canvas, Size size) {
+  Path getClip(Size size) {
     final rect = Offset.zero & size;
-    canvas.saveLayer(rect, Paint());
-    canvas.drawRect(rect, Paint()..color = overlayColor);
-    if (holeRect != null) {
-      final clearPaint = Paint()..blendMode = BlendMode.clear;
-      final rrect = RRect.fromRectAndRadius(
-        holeRect!,
-        const Radius.circular(16),
-      );
-      canvas.drawRRect(rrect, clearPaint);
-    }
-    canvas.restore();
+    final path = Path()..addRect(rect);
+    path.addRRect(
+      RRect.fromRectAndRadius(holeRect, const Radius.circular(16)),
+    );
+    path.fillType = PathFillType.evenOdd;
+    return path;
   }
 
   @override
-  bool shouldRepaint(covariant _TutorialPainter oldDelegate) {
-    return oldDelegate.holeRect != holeRect ||
-        oldDelegate.overlayColor != overlayColor;
+  bool shouldReclip(covariant _TutorialScrimClipper oldDelegate) {
+    return oldDelegate.holeRect != holeRect;
   }
 }
