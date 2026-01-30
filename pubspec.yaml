@@ -1,7 +1,7 @@
 name: gas_ahorro
 publish_to: "none"
 description: App para ver precios de gasolineras en tiempo real.
-version: 1.0.0+2
+version: 1.0.0+3
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -17,6 +17,9 @@ dependencies:
   uuid: ^4.5.2
 
 dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
   flutter_launcher_icons: ^0.14.4
   flutter_native_splash: ^2.4.3
 
