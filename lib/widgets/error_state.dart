@@ -26,16 +26,6 @@ class ErrorState extends StatelessWidget {
               style: Theme.of(context).textTheme.titleMedium,
               textAlign: TextAlign.center,
             ),
-            if (details != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                details!,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.redAccent,
-                    ),
-                textAlign: TextAlign.center,
-              ),
-            ],
             const SizedBox(height: 16),
             FilledButton(
               onPressed: onRetry,

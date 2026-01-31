@@ -28,6 +28,7 @@ import '../widgets/predictions_list.dart';
 import '../widgets/price_legend.dart';
 import '../widgets/station_sheet.dart';
 import '../widgets/tutorial_overlay.dart';
+import '../theme/app_theme.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -220,7 +221,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final isDark = _isMapDark;
+    final theme =
+        AppTheme.build(isDark ? Brightness.dark : Brightness.light);
     final colorScheme = theme.colorScheme;
     final baseOverlayStyle = theme.brightness == Brightness.dark
         ? SystemUiOverlayStyle.light
@@ -228,91 +231,96 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     final overlayStyle = baseOverlayStyle.copyWith(
       statusBarColor: Colors.transparent,
     );
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: overlayStyle,
-      child: Scaffold(
-        body: Stack(
-          children: [
-            Positioned.fill(
-              child: _buildMapBody(),
-            ),
-            SafeArea(
-              child: Stack(
-                children: [
-                  Positioned(
-                    left: 16,
-                    right: 16,
-                    top: 12,
-                    child: Column(
-                      key: _searchKey,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        MapSearchBar(
-                          controller: _searchController,
-                          focusNode: _searchFocusNode,
-                          onChanged: _onSearchChanged,
-                          onSubmitted: _onSearchSubmitted,
-                          onClear: _clearRouteAndSearch,
-                          hasRoute: _hasRoute,
-                        ),
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 260),
-                            child: FilterButton(
-                              key: _filterKey,
-                              label: _filterLabel(),
-                              onPressed: _openFuelFilter,
-                              icon: Icons.local_gas_station,
+    return Theme(
+      data: theme,
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: overlayStyle,
+        child: Scaffold(
+          body: Stack(
+            children: [
+              Positioned.fill(
+                child: _buildMapBody(),
+              ),
+              SafeArea(
+                child: Stack(
+                  children: [
+                    Positioned(
+                      left: 16,
+                      right: 16,
+                      top: 12,
+                      child: Column(
+                        key: _searchKey,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          MapSearchBar(
+                            controller: _searchController,
+                            focusNode: _searchFocusNode,
+                            onChanged: _onSearchChanged,
+                            onSubmitted: _onSearchSubmitted,
+                            onClear: _clearRouteAndSearch,
+                            hasRoute: _hasRoute,
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: ConstrainedBox(
+                              constraints:
+                                  const BoxConstraints(maxWidth: 260),
+                              child: FilterButton(
+                                key: _filterKey,
+                                label: _filterLabel(),
+                                onPressed: _openFuelFilter,
+                                icon: Icons.local_gas_station,
+                              ),
                             ),
                           ),
-                        ),
-                        if (_predictions.isNotEmpty || _loadingPredictions)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: PredictionsList(
-                              isLoading: _loadingPredictions,
-                              predictions: _predictions,
-                              onSelected: _onPredictionSelected,
-                              maxHeight: _predictionsMaxHeight(context),
+                          if (_predictions.isNotEmpty || _loadingPredictions)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: PredictionsList(
+                                isLoading: _loadingPredictions,
+                                predictions: _predictions,
+                                onSelected: _onPredictionSelected,
+                                maxHeight: _predictionsMaxHeight(context),
+                              ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  Positioned(
-                    left: 16,
-                    right: 16,
-                    bottom: 16,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (_selectedFuel != null && _minPrice != null)
-                          PriceLegend(
-                            minPrice: _minPrice!,
-                            maxPrice: _maxPrice!,
-                            backgroundColor: colorScheme.surface,
-                            textColor: colorScheme.onSurface,
-                            secondaryTextColor: colorScheme.onSurfaceVariant,
-                            shadowColor: theme.shadowColor,
-                          ),
-                      ],
+                    Positioned(
+                      left: 16,
+                      right: 16,
+                      bottom: 16,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_selectedFuel != null && _minPrice != null)
+                            PriceLegend(
+                              minPrice: _minPrice!,
+                              maxPrice: _maxPrice!,
+                              backgroundColor: colorScheme.surface,
+                              textColor: colorScheme.onSurface,
+                              secondaryTextColor:
+                                  colorScheme.onSurfaceVariant,
+                              shadowColor: theme.shadowColor,
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            if (_showTutorial)
-              TutorialOverlay(
-                step: _tutorialSteps[_tutorialStepIndex],
-                stepIndex: _tutorialStepIndex,
-                totalSteps: _tutorialSteps.length,
-                targetRect: _currentTutorialTargetRect,
-                onSkip: _dismissTutorial,
-                onNext: _advanceTutorial,
-              ),
-          ],
+              if (_showTutorial)
+                TutorialOverlay(
+                  step: _tutorialSteps[_tutorialStepIndex],
+                  stepIndex: _tutorialStepIndex,
+                  totalSteps: _tutorialSteps.length,
+                  targetRect: _currentTutorialTargetRect,
+                  onSkip: _dismissTutorial,
+                  onNext: _advanceTutorial,
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -1499,9 +1507,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   bool get _isMapDark {
-    return _isNightByLocation ??
-        (WidgetsBinding.instance.platformDispatcher.platformBrightness ==
-            Brightness.dark);
+    return _isNightByLocation ?? false;
   }
 
   Future<void> _refreshNightMode(double lat, double lng) async {
