@@ -488,209 +488,225 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openFuelFilter() async {
+    final sheetTheme =
+        AppTheme.build(_isMapDark ? Brightness.dark : Brightness.light);
     final result = await showModalBottomSheet<FilterResult>(
       context: context,
+      backgroundColor: sheetTheme.colorScheme.surface,
+      shape: sheetTheme.bottomSheetTheme.shape,
+      clipBehavior: Clip.antiAlias,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (context) {
-        final theme = Theme.of(context);
-        FuelOptionId? tempSelection = _selectedFuel;
-        bool tempCheapestOnly = _filterCheapestOnly;
-        bool tempIncludeRestricted = _includeRestricted;
-        bool tempShowPrices = _showPriceLabels;
-        bool tempRouteAuto = _routeRadiusMeters == null;
-        double tempRouteMeters = (_routeRadiusMeters ?? 2000).toDouble();
-        int? tempRouteRadiusMeters = _routeRadiusMeters;
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final media = MediaQuery.of(context);
-            final bottomInset =
-                16 + media.viewInsets.bottom + media.viewPadding.bottom;
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                bottom: bottomInset,
-                top: 8,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Selecciona combustible',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: (tempSelection == null &&
-                                !tempCheapestOnly &&
-                                !tempIncludeRestricted &&
-                                tempShowPrices &&
-                                tempRouteAuto)
-                            ? null
-                            : () => setModalState(() {
-                                  tempSelection = null;
-                                  tempCheapestOnly = false;
-                                  tempIncludeRestricted = false;
-                                  tempShowPrices = true;
-                                  tempRouteAuto = true;
-                                  tempRouteMeters = 2000;
-                                  tempRouteRadiusMeters = null;
-                                }),
-                        child: const Text('Limpiar'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      ..._fuelOptions.map((option) {
-                        final chipLabel = Row(
-                          mainAxisSize: MainAxisSize.min,
+        return Theme(
+          data: sheetTheme,
+          child: Builder(
+            builder: (context) {
+              final theme = Theme.of(context);
+              FuelOptionId? tempSelection = _selectedFuel;
+              bool tempCheapestOnly = _filterCheapestOnly;
+              bool tempIncludeRestricted = _includeRestricted;
+              bool tempShowPrices = _showPriceLabels;
+              bool tempRouteAuto = _routeRadiusMeters == null;
+              double tempRouteMeters = (_routeRadiusMeters ?? 2000).toDouble();
+              int? tempRouteRadiusMeters = _routeRadiusMeters;
+              return StatefulBuilder(
+                builder: (context, setModalState) {
+                  final media = MediaQuery.of(context);
+                  final bottomInset =
+                      16 + media.viewInsets.bottom + media.viewPadding.bottom;
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      left: 16,
+                      right: 16,
+                      bottom: bottomInset,
+                      top: 8,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
                           children: [
-                            Container(
-                              width: 10,
-                              height: 10,
-                              decoration: BoxDecoration(
-                                color: option.color,
-                                shape: BoxShape.circle,
+                            Expanded(
+                              child: Text(
+                                'Selecciona combustible',
+                                style: theme.textTheme.titleMedium,
                               ),
                             ),
-                            const SizedBox(width: 6),
-                            Text(
-                              option.label,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
+                            TextButton(
+                              onPressed: (tempSelection == null &&
+                                      !tempCheapestOnly &&
+                                      !tempIncludeRestricted &&
+                                      tempShowPrices &&
+                                      tempRouteAuto)
+                                  ? null
+                                  : () => setModalState(() {
+                                        tempSelection = null;
+                                        tempCheapestOnly = false;
+                                        tempIncludeRestricted = false;
+                                        tempShowPrices = true;
+                                        tempRouteAuto = true;
+                                        tempRouteMeters = 2000;
+                                        tempRouteRadiusMeters = null;
+                                      }),
+                              child: const Text('Limpiar'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ..._fuelOptions.map((option) {
+                              final chipLabel = Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 10,
+                                    height: 10,
+                                    decoration: BoxDecoration(
+                                      color: option.color,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    option.label,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              );
+                              return ChoiceChip(
+                                label: chipLabel,
+                                selected: tempSelection == option.id,
+                                onSelected: (value) => setModalState(() {
+                                  tempSelection = value ? option.id : null;
+                                }),
+                              );
+                            }),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Solo mas baratas'),
+                          subtitle:
+                              const Text('Muestra solo el tramo mas economico.'),
+                          value: tempCheapestOnly,
+                          onChanged: (value) => setModalState(() {
+                            tempCheapestOnly = value;
+                          }),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Incluir venta restringida'),
+                          subtitle: const Text(
+                              'Solo para flotas o clientes autorizados.'),
+                          value: tempIncludeRestricted,
+                          onChanged: (value) => setModalState(() {
+                            tempIncludeRestricted = value;
+                          }),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Mostrar precios en el mapa'),
+                          subtitle: const Text(
+                              'Muestra el precio junto al icono del surtidor.'),
+                          value: tempShowPrices,
+                          onChanged: (value) => setModalState(() {
+                            tempShowPrices = value;
+                          }),
+                        ),
+                        if (_hasRoute)
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 8),
+                              Text(
+                                'Radio en ruta',
+                                style: theme.textTheme.titleSmall,
+                              ),
+                              const SizedBox(height: 8),
+                              SwitchListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text('Automatico'),
+                                subtitle: const Text(
+                                  'Ajusta el radio segun la longitud de la ruta.',
+                                ),
+                                value: tempRouteAuto,
+                                onChanged: (value) => setModalState(() {
+                                  tempRouteAuto = value;
+                                  if (tempRouteAuto) {
+                                    tempRouteRadiusMeters = null;
+                                  } else {
+                                    tempRouteMeters =
+                                        tempRouteMeters.clamp(500, 10000);
+                                    tempRouteRadiusMeters =
+                                        tempRouteMeters.round();
+                                  }
+                                }),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Radio: ${_formatRouteRadius(tempRouteMeters.round())}',
+                                style: theme.textTheme.bodyMedium,
+                              ),
+                              Slider(
+                                value: tempRouteMeters.clamp(500, 10000),
+                                min: 500,
+                                max: 10000,
+                                divisions: 95,
+                                label: _formatRouteRadius(
+                                  tempRouteMeters.round(),
+                                ),
+                                onChanged: tempRouteAuto
+                                    ? null
+                                    : (value) => setModalState(() {
+                                          tempRouteMeters =
+                                              (value / 100).round() * 100.0;
+                                          tempRouteRadiusMeters =
+                                              tempRouteMeters.round();
+                                        }),
+                              ),
+                            ],
+                          ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () => Navigator.of(context).pop(),
+                                child: const Text('Cancelar'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: FilledButton(
+                                onPressed: () => Navigator.of(context).pop(
+                                  FilterResult(
+                                    fuel: tempSelection,
+                                    cheapestOnly: tempCheapestOnly,
+                                    includeRestricted: tempIncludeRestricted,
+                                    showPrices: tempShowPrices,
+                                    routeRadiusMeters: tempRouteRadiusMeters,
+                                  ),
+                                ),
+                                child: const Text('Aplicar'),
                               ),
                             ),
                           ],
-                        );
-                        return ChoiceChip(
-                          label: chipLabel,
-                          selected: tempSelection == option.id,
-                          onSelected: (value) => setModalState(() {
-                            tempSelection = value ? option.id : null;
-                          }),
-                        );
-                      }),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Solo mas baratas'),
-                    subtitle: const Text('Muestra solo el tramo mas economico.'),
-                    value: tempCheapestOnly,
-                    onChanged: (value) => setModalState(() {
-                      tempCheapestOnly = value;
-                    }),
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Incluir venta restringida'),
-                    subtitle:
-                        const Text('Solo para flotas o clientes autorizados.'),
-                    value: tempIncludeRestricted,
-                    onChanged: (value) => setModalState(() {
-                      tempIncludeRestricted = value;
-                    }),
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Mostrar precios en el mapa'),
-                    subtitle:
-                        const Text('Muestra el precio junto al icono del surtidor.'),
-                    value: tempShowPrices,
-                    onChanged: (value) => setModalState(() {
-                      tempShowPrices = value;
-                    }),
-                  ),
-                  if (_hasRoute)
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 8),
-                        Text(
-                          'Radio en ruta',
-                          style: theme.textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Automatico'),
-                          subtitle: const Text(
-                            'Ajusta el radio segun la longitud de la ruta.',
-                          ),
-                          value: tempRouteAuto,
-                          onChanged: (value) => setModalState(() {
-                            tempRouteAuto = value;
-                            if (tempRouteAuto) {
-                              tempRouteRadiusMeters = null;
-                            } else {
-                              tempRouteMeters =
-                                  tempRouteMeters.clamp(500, 10000);
-                              tempRouteRadiusMeters = tempRouteMeters.round();
-                            }
-                          }),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Radio: ${_formatRouteRadius(tempRouteMeters.round())}',
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                        Slider(
-                          value: tempRouteMeters.clamp(500, 10000),
-                          min: 500,
-                          max: 10000,
-                          divisions: 95,
-                          label: _formatRouteRadius(tempRouteMeters.round()),
-                          onChanged: tempRouteAuto
-                              ? null
-                              : (value) => setModalState(() {
-                                    tempRouteMeters =
-                                        (value / 100).round() * 100.0;
-                                    tempRouteRadiusMeters =
-                                        tempRouteMeters.round();
-                                  }),
                         ),
                       ],
                     ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          child: const Text('Cancelar'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton(
-                          onPressed: () => Navigator.of(context).pop(
-                            FilterResult(
-                              fuel: tempSelection,
-                              cheapestOnly: tempCheapestOnly,
-                              includeRestricted: tempIncludeRestricted,
-                              showPrices: tempShowPrices,
-                              routeRadiusMeters: tempRouteRadiusMeters,
-                            ),
-                          ),
-                          child: const Text('Aplicar'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          },
+                  );
+                },
+              );
+            },
+          ),
         );
       },
     );
@@ -1100,16 +1116,24 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   Future<void> _showStationSheet(Station station) async {
     final markerColor = _markerColorForStation(station);
+    final sheetTheme =
+        AppTheme.build(_isMapDark ? Brightness.dark : Brightness.light);
 
     await showModalBottomSheet<void>(
       context: context,
+      backgroundColor: sheetTheme.colorScheme.surface,
+      shape: sheetTheme.bottomSheetTheme.shape,
+      clipBehavior: Clip.antiAlias,
       showDragHandle: true,
       isScrollControlled: true,
       builder: (context) {
-        return StationSheet(
-          station: station,
-          markerColor: markerColor,
-          onNavigate: () => _launchNavigation(station),
+        return Theme(
+          data: sheetTheme,
+          child: StationSheet(
+            station: station,
+            markerColor: markerColor,
+            onNavigate: () => _launchNavigation(station),
+          ),
         );
       },
     );
