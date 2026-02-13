@@ -14,7 +14,7 @@ class GasAhorroApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.build(Brightness.light),
       darkTheme: AppTheme.build(Brightness.dark),
-      themeMode: ThemeMode.light,
+      themeMode: ThemeMode.system,
       home: const MapScreen(),
     );
   }

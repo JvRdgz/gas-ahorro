@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/filter_result.dart';
@@ -44,6 +45,13 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   static const int _iosViewportThreshold = 1500;
   static const int _viewportFilterThreshold = 700;
   static const int _downsampleThreshold = 500;
+  static const double _wideLayoutBreakpoint = 900;
+  static const Duration _cameraIdleDebounceDuration = Duration(
+    milliseconds: 220,
+  );
+  static const double _smallZoomDeltaThreshold = 0.12;
+  static const double _smallMoveMetersThreshold = 120;
+  static const double _priceLabelsMinZoomNoRoute = 10.2;
 
   static const List<FuelOption> _fuelOptions = [
     FuelOption(
@@ -98,6 +106,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   double? _markerMinPrice;
   double? _markerMaxPrice;
   Timer? _debounce;
+  Timer? _cameraIdleDebounce;
   Timer? _nightTimer;
   String _sessionToken = '';
   List<PlacePrediction> _predictions = [];
@@ -116,6 +125,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   double? _destinationLng;
   bool _loadingStations = true;
   bool _isApplyingFilter = false;
+  int _filterLoadingDepth = 0;
   bool _filterCheapestOnly = false;
   bool _includeRestricted = false;
   bool _showPriceLabels = true;
@@ -132,6 +142,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   final Map<int, Future<BitmapDescriptor>> _simpleIconLoaders = {};
   final Map<String, BitmapDescriptor> _priceIconCache = {};
   final Map<String, Future<BitmapDescriptor>> _priceIconLoaders = {};
+  LatLng? _lastRenderedCameraCenter;
+  double? _lastRenderedZoom;
+  int _markerRefreshToken = 0;
   static const Color _restrictedMarkerColor = Color(0xFF5D6A70);
   static const String _prefsFuelKey = 'filter_fuel_id';
   static const String _prefsCheapestKey = 'filter_cheapest_only';
@@ -170,8 +183,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     ),
     TutorialStep(
       title: 'Selecciona el tipo de venta',
-      description:
-          'Puedes mostrar gasolineras con venta restringida (flotas o '
+      description: 'Puedes mostrar gasolineras con venta restringida (flotas o '
           'clientes autorizados) desde el filtro.',
       targetKey: _filterKey,
     ),
@@ -208,6 +220,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _searchController.dispose();
     _searchFocusNode.dispose();
     _debounce?.cancel();
+    _cameraIdleDebounce?.cancel();
     _nightTimer?.cancel();
     super.dispose();
   }
@@ -222,9 +235,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final isDark = _isMapDark;
-    final theme =
-        AppTheme.build(isDark ? Brightness.dark : Brightness.light);
+    final theme = AppTheme.build(isDark ? Brightness.dark : Brightness.light);
     final colorScheme = theme.colorScheme;
+    final useWideLayout =
+        MediaQuery.sizeOf(context).width >= _wideLayoutBreakpoint;
     final baseOverlayStyle = theme.brightness == Brightness.dark
         ? SystemUiOverlayStyle.light
         : SystemUiOverlayStyle.dark;
@@ -242,73 +256,9 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                 child: _buildMapBody(),
               ),
               SafeArea(
-                child: Stack(
-                  children: [
-                    Positioned(
-                      left: 16,
-                      right: 16,
-                      top: 12,
-                      child: Column(
-                        key: _searchKey,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          MapSearchBar(
-                            controller: _searchController,
-                            focusNode: _searchFocusNode,
-                            onChanged: _onSearchChanged,
-                            onSubmitted: _onSearchSubmitted,
-                            onClear: _clearRouteAndSearch,
-                            hasRoute: _hasRoute,
-                          ),
-                          const SizedBox(height: 8),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: ConstrainedBox(
-                              constraints:
-                                  const BoxConstraints(maxWidth: 260),
-                              child: FilterButton(
-                                key: _filterKey,
-                                label: _filterLabel(),
-                                onPressed: _openFuelFilter,
-                                icon: Icons.local_gas_station,
-                              ),
-                            ),
-                          ),
-                          if (_predictions.isNotEmpty || _loadingPredictions)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: PredictionsList(
-                                isLoading: _loadingPredictions,
-                                predictions: _predictions,
-                                onSelected: _onPredictionSelected,
-                                maxHeight: _predictionsMaxHeight(context),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    Positioned(
-                      left: 16,
-                      right: 16,
-                      bottom: 16,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (_selectedFuel != null && _minPrice != null)
-                            PriceLegend(
-                              minPrice: _minPrice!,
-                              maxPrice: _maxPrice!,
-                              backgroundColor: colorScheme.surface,
-                              textColor: colorScheme.onSurface,
-                              secondaryTextColor:
-                                  colorScheme.onSurfaceVariant,
-                              shadowColor: theme.shadowColor,
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                child: useWideLayout
+                    ? _buildWideOverlay(context, theme, colorScheme)
+                    : _buildCompactOverlay(context, theme, colorScheme),
               ),
               if (_showTutorial)
                 TutorialOverlay(
@@ -319,10 +269,158 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                   onSkip: _dismissTutorial,
                   onNext: _advanceTutorial,
                 ),
+              if (_isApplyingFilter)
+                Positioned.fill(
+                  child: ColoredBox(
+                    color: theme.scaffoldBackgroundColor.withValues(alpha: 0.86),
+                    child: const Center(
+                      child: CircularProgressIndicator(),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildCompactOverlay(
+    BuildContext context,
+    ThemeData theme,
+    ColorScheme colorScheme,
+  ) {
+    return Stack(
+      children: [
+        Positioned(
+          left: 16,
+          right: 16,
+          top: 12,
+          child: _buildSearchAndFilterColumn(
+            context,
+            predictionsMaxHeight: _predictionsMaxHeight(context),
+          ),
+        ),
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 16,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildPriceLegend(theme, colorScheme),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWideOverlay(
+    BuildContext context,
+    ThemeData theme,
+    ColorScheme colorScheme,
+  ) {
+    final media = MediaQuery.of(context);
+    final predictionsMaxHeight = math.min(media.size.height * 0.45, 420.0);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 380),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: colorScheme.surface.withValues(alpha: 0.95),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: colorScheme.outline.withValues(alpha: 0.3),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: theme.shadowColor.withValues(alpha: 0.18),
+                    blurRadius: 16,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildSearchAndFilterColumn(
+                      context,
+                      predictionsMaxHeight: predictionsMaxHeight,
+                    ),
+                    const SizedBox(height: 10),
+                    _buildPriceLegend(theme, colorScheme),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchAndFilterColumn(
+    BuildContext context, {
+    required double predictionsMaxHeight,
+  }) {
+    return Column(
+      key: _searchKey,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        MapSearchBar(
+          controller: _searchController,
+          focusNode: _searchFocusNode,
+          onChanged: _onSearchChanged,
+          onSubmitted: _onSearchSubmitted,
+          onClear: _clearRouteAndSearch,
+          hasRoute: _hasRoute,
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 260),
+            child: FilterButton(
+              key: _filterKey,
+              label: _filterLabel(),
+              onPressed: _openFuelFilter,
+              icon: Icons.local_gas_station,
+            ),
+          ),
+        ),
+        if (_predictions.isNotEmpty || _loadingPredictions)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: PredictionsList(
+              isLoading: _loadingPredictions,
+              predictions: _predictions,
+              onSelected: _onPredictionSelected,
+              maxHeight: predictionsMaxHeight,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildPriceLegend(ThemeData theme, ColorScheme colorScheme) {
+    if (_selectedFuel == null || _minPrice == null || _maxPrice == null) {
+      return const SizedBox.shrink();
+    }
+    return PriceLegend(
+      minPrice: _minPrice!,
+      maxPrice: _maxPrice!,
+      backgroundColor: colorScheme.surface,
+      textColor: colorScheme.onSurface,
+      secondaryTextColor: colorScheme.onSurfaceVariant,
+      shadowColor: theme.shadowColor,
     );
   }
 
@@ -366,15 +464,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
             onTap: (_) => _dismissKeyboard(),
           ),
         ),
-        if (_isApplyingFilter)
-          Positioned.fill(
-            child: Container(
-              color: Colors.black12,
-              child: const Center(
-                child: CircularProgressIndicator(),
-              ),
-            ),
-          ),
         Positioned(
           right: 16,
           bottom: 108,
@@ -594,8 +683,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
                           title: const Text('Solo mas baratas'),
-                          subtitle:
-                              const Text('Muestra solo el tramo mas economico.'),
+                          subtitle: const Text(
+                              'Muestra solo el tramo mas economico.'),
                           value: tempCheapestOnly,
                           onChanged: (value) => setModalState(() {
                             tempCheapestOnly = value;
@@ -674,6 +763,14 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
                               ),
                             ],
                           ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: _openPrivacyPolicy,
+                            icon: const Icon(Icons.privacy_tip_outlined),
+                            label: const Text('Política de privacidad'),
+                          ),
+                        ),
                         const SizedBox(height: 8),
                         Row(
                           children: [
@@ -728,21 +825,23 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     bool showPrices,
     int? routeRadiusMeters,
   ) async {
-    final previousRouteRadius = _routeRadiusMeters;
-    setState(() {
-      _selectedFuel = selection;
-      _filterCheapestOnly = cheapestOnly;
-      _includeRestricted = includeRestricted;
-      _showPriceLabels = showPrices;
-      _routeRadiusMeters = routeRadiusMeters;
+    await _runWithFilterLoading(() async {
+      final previousRouteRadius = _routeRadiusMeters;
+      setState(() {
+        _selectedFuel = selection;
+        _filterCheapestOnly = cheapestOnly;
+        _includeRestricted = includeRestricted;
+        _showPriceLabels = showPrices;
+        _routeRadiusMeters = routeRadiusMeters;
+      });
+      await _persistFilterPreferences();
+      final routeRadiusChanged = previousRouteRadius != _routeRadiusMeters;
+      if (_hasRoute && _routePoints.isNotEmpty && routeRadiusChanged) {
+        await _applyRouteFilter(_routePoints);
+        return;
+      }
+      await _rebuildMarkersForSelection();
     });
-    await _persistFilterPreferences();
-    final routeRadiusChanged = previousRouteRadius != _routeRadiusMeters;
-    if (_hasRoute && _routePoints.isNotEmpty && routeRadiusChanged) {
-      await _applyRouteFilter(_routePoints);
-      return;
-    }
-    await _runWithFilterLoading(_rebuildMarkersForSelection);
   }
 
   Future<void> _persistFilterPreferences() async {
@@ -794,13 +893,17 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _runWithFilterLoading(Future<void> Function() task) async {
-    setState(() {
-      _isApplyingFilter = true;
-    });
+    _filterLoadingDepth++;
+    if (mounted && !_isApplyingFilter) {
+      setState(() {
+        _isApplyingFilter = true;
+      });
+    }
     try {
       await task();
     } finally {
-      if (mounted) {
+      _filterLoadingDepth = math.max(0, _filterLoadingDepth - 1);
+      if (mounted && _filterLoadingDepth == 0) {
         setState(() {
           _isApplyingFilter = false;
         });
@@ -894,16 +997,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     final minPrice = (result['minPrice'] as num).toDouble();
     final maxPrice = (result['maxPrice'] as num).toDouble();
     final stationsToUse = indices.map((i) => visibleStations[i]).toList();
+    setState(() {
+      _minPrice = minPrice;
+      _maxPrice = maxPrice;
+    });
     await _setMarkersForStations(
       stationsToUse,
       minPrice: minPrice,
       maxPrice: maxPrice,
     );
-
-    setState(() {
-      _minPrice = minPrice;
-      _maxPrice = maxPrice;
-    });
   }
 
   Map<String, Map<FuelOptionId, double>> _buildFuelPriceIndex(
@@ -929,21 +1031,6 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     return index;
   }
 
-  Future<void> _setMarkersInBatches(Iterable<Marker> markers) async {
-    const batchSize = 400;
-    final list = markers.toList(growable: false);
-    final result = <Marker>{};
-    for (var i = 0; i < list.length; i += batchSize) {
-      final end = math.min(i + batchSize, list.length);
-      result.addAll(list.sublist(i, end));
-      if (!mounted) return;
-      setState(() {
-        _stationMarkers = Set<Marker>.of(result);
-      });
-      await Future<void>.delayed(const Duration(milliseconds: 16));
-    }
-  }
-
   Future<void> _setMarkersForStations(
     List<Station> stations, {
     double? minPrice,
@@ -952,15 +1039,20 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     _markerStationsSource = stations;
     _markerMinPrice = minPrice;
     _markerMaxPrice = maxPrice;
-    await _refreshVisibleMarkers();
+    _lastRenderedCameraCenter = null;
+    _lastRenderedZoom = null;
+    await _refreshVisibleMarkers(force: true);
   }
 
   void _onCameraIdle() {
     if (!mounted || _markerStationsSource.isEmpty) return;
-    _refreshVisibleMarkers();
+    _cameraIdleDebounce?.cancel();
+    _cameraIdleDebounce = Timer(_cameraIdleDebounceDuration, () {
+      _refreshVisibleMarkers();
+    });
   }
 
-  Future<void> _refreshVisibleMarkers() async {
+  Future<void> _refreshVisibleMarkers({bool force = false}) async {
     final controller = _mapController;
     if (!mounted) return;
     if (controller == null) return;
@@ -968,6 +1060,10 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     var stationsToRender = _markerStationsSource;
     final bounds = await controller.getVisibleRegion();
     final zoom = await controller.getZoomLevel();
+    if (!force && _canSkipMarkerRefresh(bounds, zoom)) {
+      return;
+    }
+    final refreshToken = ++_markerRefreshToken;
     if (stationsToRender.length > _viewportFilterThreshold ||
         (defaultTargetPlatform == TargetPlatform.iOS &&
             stationsToRender.length > _iosViewportThreshold)) {
@@ -979,9 +1075,37 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       stationsToRender = _downsample(stationsToRender);
     }
 
-    final markers = await _buildMarkers(stationsToRender);
+    final markers = await _buildMarkers(stationsToRender, zoom);
     if (!mounted) return;
-    await _setMarkersInBatches(markers);
+    if (refreshToken != _markerRefreshToken) return;
+    setState(() {
+      _stationMarkers = markers;
+    });
+    _lastRenderedCameraCenter = _boundsCenter(bounds);
+    _lastRenderedZoom = zoom;
+  }
+
+  bool _canSkipMarkerRefresh(LatLngBounds bounds, double zoom) {
+    final lastCenter = _lastRenderedCameraCenter;
+    final lastZoom = _lastRenderedZoom;
+    if (lastCenter == null || lastZoom == null) return false;
+    final center = _boundsCenter(bounds);
+    final movedMeters = _distanceMeters(
+      lastCenter.latitude,
+      lastCenter.longitude,
+      center.latitude,
+      center.longitude,
+    );
+    final zoomDelta = (zoom - lastZoom).abs();
+    return movedMeters < _smallMoveMetersThreshold &&
+        zoomDelta < _smallZoomDeltaThreshold;
+  }
+
+  LatLng _boundsCenter(LatLngBounds bounds) {
+    return LatLng(
+      (bounds.northeast.latitude + bounds.southwest.latitude) / 2,
+      (bounds.northeast.longitude + bounds.southwest.longitude) / 2,
+    );
   }
 
   List<Station> _stationsInBounds(
@@ -1023,14 +1147,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     );
   }
 
-  Future<Set<Marker>> _buildMarkers(List<Station> stations) async {
+  Future<Set<Marker>> _buildMarkers(List<Station> stations, double zoom) async {
     if (stations.isEmpty) return const {};
     final minPrice = _markerMinPrice;
     final maxPrice = _markerMaxPrice;
     if (_showPriceLabels &&
         _selectedFuel != null &&
         minPrice != null &&
-        maxPrice != null) {
+        maxPrice != null &&
+        _shouldShowPriceLabelsAtZoom(zoom)) {
       return _buildPriceMarkers(stations, minPrice, maxPrice);
     }
 
@@ -1046,18 +1171,21 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       iconKeys.map((value) => _iconForColor(Color(value))),
     );
 
-    return stations.map((station) {
-      final colorValue = stationIcons[station.id];
-      if (colorValue == null) return null;
-      final icon = _simpleIconCache[colorValue];
-      if (icon == null) return null;
-      return Marker(
-        markerId: MarkerId(station.id),
-        position: LatLng(station.lat, station.lng),
-        icon: icon,
-        onTap: () => _showStationSheet(station),
-      );
-    }).whereType<Marker>().toSet();
+    return stations
+        .map((station) {
+          final colorValue = stationIcons[station.id];
+          if (colorValue == null) return null;
+          final icon = _simpleIconCache[colorValue];
+          if (icon == null) return null;
+          return Marker(
+            markerId: MarkerId(station.id),
+            position: LatLng(station.lat, station.lng),
+            icon: icon,
+            onTap: () => _showStationSheet(station),
+          );
+        })
+        .whereType<Marker>()
+        .toSet();
   }
 
   Future<BitmapDescriptor> _iconForColor(Color color) async {
@@ -1083,7 +1211,7 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
       final hue = _bucketHue(PriceColor.hueFor(price, minPrice, maxPrice));
       final color =
           station.isRestricted ? _restrictedMarkerColor : _colorForHue(hue);
-      final label = _formatPrice(price);
+      final label = _formatPriceForMarker(_quantizePriceForMarker(price));
       final key = _PriceIconKey(color.toARGB32(), label);
       iconKeys.add(key);
       stationIcons[station.id] = key;
@@ -1093,18 +1221,22 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
         (key) => _iconForColorWithPrice(Color(key.colorValue), key.label),
       ),
     );
-    return stations.map((station) {
-      final key = stationIcons[station.id];
-      if (key == null) return null;
-      final icon = _priceIconCache[_priceCacheKey(key.colorValue, key.label)];
-      if (icon == null) return null;
-      return Marker(
-        markerId: MarkerId(station.id),
-        position: LatLng(station.lat, station.lng),
-        icon: icon,
-        onTap: () => _showStationSheet(station),
-      );
-    }).whereType<Marker>().toSet();
+    return stations
+        .map((station) {
+          final key = stationIcons[station.id];
+          if (key == null) return null;
+          final icon =
+              _priceIconCache[_priceCacheKey(key.colorValue, key.label)];
+          if (icon == null) return null;
+          return Marker(
+            markerId: MarkerId(station.id),
+            position: LatLng(station.lat, station.lng),
+            icon: icon,
+            onTap: () => _showStationSheet(station),
+          );
+        })
+        .whereType<Marker>()
+        .toSet();
   }
 
   double? _priceForSelectedFuel(Station station) {
@@ -1144,8 +1276,19 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     await _launcher.openDefaultMaps(station.lat, station.lng);
   }
 
-  String _formatPrice(double price) {
-    return price.toStringAsFixed(3);
+  double _quantizePriceForMarker(double price) {
+    return (price * 50).round() / 50;
+  }
+
+  String _formatPriceForMarker(double price) {
+    return price.toStringAsFixed(2);
+  }
+
+  bool _shouldShowPriceLabelsAtZoom(double zoom) {
+    if (_hasRoute) {
+      return true;
+    }
+    return zoom >= _priceLabelsMinZoomNoRoute;
   }
 
   double _bucketHue(double hue) {
@@ -1321,7 +1464,8 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
 
   String _filterLabel() {
     final selection = _selectedFuel;
-    var base = selection == null ? 'Selecciona combustible' : _fuelLabelFor(selection);
+    var base =
+        selection == null ? 'Selecciona combustible' : _fuelLabelFor(selection);
     if (_filterCheapestOnly) {
       base = '$base · mas baratas';
     }
@@ -1341,13 +1485,15 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
   }
 
   Color _markerColorForStation(Station station) {
+    final minPrice = _markerMinPrice ?? _minPrice;
+    final maxPrice = _markerMaxPrice ?? _maxPrice;
     if (station.isRestricted) {
       return _restrictedMarkerColor;
     }
-    if (_selectedFuel != null && _minPrice != null && _maxPrice != null) {
+    if (_selectedFuel != null && minPrice != null && maxPrice != null) {
       final price = _priceForSelectedFuel(station);
       if (price != null) {
-        return PriceColor.colorFor(price, _minPrice!, _maxPrice!);
+        return PriceColor.colorFor(price, minPrice, maxPrice);
       }
     }
     return const HSVColor.fromAHSV(1, _unselectedHue, 0.85, 0.9).toColor();
@@ -1873,6 +2019,17 @@ class _MapScreenState extends State<MapScreen> with WidgetsBindingObserver {
     await _mapController?.animateCamera(
       CameraUpdate.newLatLngBounds(bounds, 48),
     );
+  }
+
+  Future<void> _openPrivacyPolicy() async {
+    final uri = Uri.parse('https://gasahorro.es/#legal');
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('No se pudo abrir la política de privacidad.')),
+      );
+    }
   }
 }
 

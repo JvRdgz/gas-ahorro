@@ -12,7 +12,7 @@ class AppTheme {
     final scheme = (brightness == Brightness.dark
             ? baseScheme.copyWith(
                 surface: const Color(0xFF0F1412),
-                surfaceVariant: const Color(0xFF1C2421),
+                surfaceContainerHighest: const Color(0xFF1C2421),
                 outline: const Color(0xFF3A4540),
               )
             : baseScheme)
@@ -37,9 +37,9 @@ class AppTheme {
         margin: EdgeInsets.zero,
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: scheme.surfaceVariant,
+        backgroundColor: scheme.surfaceContainerHighest,
         selectedColor: scheme.primaryContainer,
-        disabledColor: scheme.surfaceVariant.withValues(alpha: 0.6),
+        disabledColor: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
         labelStyle: TextStyle(color: scheme.onSurface),
         secondaryLabelStyle: TextStyle(color: scheme.onPrimaryContainer),
         side: BorderSide(color: scheme.outline),
@@ -52,25 +52,25 @@ class AppTheme {
         textColor: scheme.onSurface,
       ),
       switchTheme: SwitchThemeData(
-        thumbColor: MaterialStateProperty.resolveWith(
-          (states) => states.contains(MaterialState.selected)
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
               ? scheme.onPrimary
               : scheme.onSurfaceVariant,
         ),
-        trackColor: MaterialStateProperty.resolveWith(
-          (states) => states.contains(MaterialState.selected)
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
               ? scheme.primary
-              : scheme.surfaceVariant,
+              : scheme.surfaceContainerHighest,
         ),
       ),
       sliderTheme: SliderThemeData(
         activeTrackColor: scheme.primary,
-        inactiveTrackColor: scheme.surfaceVariant,
+        inactiveTrackColor: scheme.surfaceContainerHighest,
         thumbColor: scheme.primary,
         overlayColor: scheme.primary.withValues(alpha: 0.12),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: scheme.surfaceVariant,
+        backgroundColor: scheme.surfaceContainerHighest,
         contentTextStyle: TextStyle(color: scheme.onSurface),
         actionTextColor: scheme.primary,
       ),
